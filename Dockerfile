@@ -17,6 +17,10 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     apt-get update && apt-get install -y --no-install-recommends \
     libasound2-dev \
     portaudio19-dev \
+    gcc \
+    libportaudio2 \ 
+    libportaudiocpp0 \
+    libc6-dev \
     && rm -rf /var/lib/apt/lists/*
 
 
@@ -30,7 +34,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 ##########################################################################
 # Application
-FROM --platform=$TARGETPLATFORM pipewire-docker:latest AS final
+FROM --platform=$TARGETPLATFORM python:3.11-slim AS final
 
 LABEL org.opencontainers.image.title="wakeword-detector"
 
@@ -40,25 +44,36 @@ WORKDIR /app
 
 ENV PATH="/app/.venv/bin:$PATH"
 
-# Copy Python interpreter & libs from the builder
-COPY --from=builder /usr/local/bin/python* /usr/local/bin/
-COPY --from=builder /usr/local/lib/libpython* /usr/local/lib/
-COPY --from=builder /usr/local/lib/python3.11 /usr/local/lib/python3.11
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
+    python3-pyaudio nano pipewire-audio-client-libraries libpulse0  \
+    pipewire-alsa alsa-utils pipewire-audio pipewire-pulse \
+    && rm -rf /var/lib/apt/lists/*
 
-# This tells the OS to look for shared libraries in /usr/local/lib
-RUN ldconfig
+
+# Create a non-root user and group for security
+RUN groupadd --system --gid 1000 appgroup && \
+    useradd --system --uid 1000 --gid appgroup appuser
+
+WORKDIR /app
+ENV VIRTUAL_ENV=/app/.venv
+ENV PATH="/app/.venv/bin:$PATH" 
 
 # Copy the entire pre-built virtual environment from the builder
-COPY --from=builder /app/.venv ./.venv
-
-COPY src /app
+# Order matters here for good caching
+COPY --chown=appuser:appgroup --from=builder /app/.venv ./.venv
+COPY --chown=appuser:appgroup src/ .
 
 # Define build-time argument for the model name
 ARG WAKEWORD_MODEL_NAME=hey_jarvis
 ENV WAKEWORD_MODEL_NAME=${WAKEWORD_MODEL_NAME}
 
+USER appuser
+
 # Pre-download the model using the venv's python
 RUN python3 -c "import os; from openwakeword.utils import download_models; download_models(model_names=[os.environ['WAKEWORD_MODEL_NAME']])"
+
 
 # CMD ["python3", "main.py"]
 CMD ["bash"]
