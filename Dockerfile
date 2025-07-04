@@ -71,9 +71,6 @@ ENV WAKEWORD_MODEL_NAME=${WAKEWORD_MODEL_NAME}
 
 USER appuser
 
-# Pre-download the model using the venv's python
-RUN python3 -c "import os; from openwakeword.utils import download_models; download_models(model_names=[os.environ['WAKEWORD_MODEL_NAME']])"
-
 
 # CMD ["python3", "main.py"]
 CMD ["bash"]
