@@ -32,12 +32,11 @@ ERROR = SOUND_DIR / "failed.mp3"
 WS_SERVER_URL = f"ws://{BASE_URL}/stream"
 RECONNECT_DELAY_SECONDS = 5  # Time to wait before trying to reconnect
 
-# State
-IS_LISTENING = False
-
 # WakeWord
 openwakeword.utils.download_models(model_names=[WAKEWORD_MODEL])
-oww_model = Model(wakeword_models=[WAKEWORD_MODEL], inference_framework=INFERENCE_FRAMEWORK)
+oww_model = Model(
+    wakeword_models=[WAKEWORD_MODEL], inference_framework=INFERENCE_FRAMEWORK
+)
 
 AUDIO_CONFIG = {
     "sample_rate": 16000,
@@ -114,7 +113,9 @@ async def stream_audio(
 ):
     while True:
         try:
-            frames = await get_audio_frames(audio_queue=audio_queue, chunk_ms=20, duration_ms=20, normalize=True)
+            frames = await get_audio_frames(
+                audio_queue=audio_queue, chunk_ms=20, duration_ms=20, normalize=True
+            )
             await websocket.send(frames)
         except ConnectionClosed:
             logger.info("Connection closed")
@@ -124,6 +125,14 @@ async def stream_audio(
         except Exception:
             logger.exception("Message handler encountered a fatal error.")
             raise
+
+def clear_queue(q: asyncio.Queue):
+    while True:
+        try:
+            q.get_nowait()
+        except asyncio.queues.QueueEmpty:
+            break
+
 
 def normalize_audio(audio_data: list) -> np.ndarray:
     # Normalize to prevent clipping
@@ -140,8 +149,9 @@ def normalize_audio(audio_data: list) -> np.ndarray:
     audio_int16 = (audio_float * 32768.0).astype(np.int16)
     return audio_int16
 
+
 async def get_audio_frames(
-    audio_queue: asyncio.Queue, chunk_ms: int,  duration_ms: int, normalize: bool = True
+    audio_queue: asyncio.Queue, chunk_ms: int, duration_ms: int, normalize: bool = True
 ) -> np.ndarray:
     num_chunks = duration_ms // chunk_ms
     if num_chunks == 0:
@@ -151,9 +161,7 @@ async def get_audio_frames(
     try:
         timeout_seconds = (chunk_ms * 1.5) / 1000.0
         for _ in range(num_chunks):
-            chunk = await asyncio.wait_for(
-                audio_queue.get(), timeout=timeout_seconds
-            )
+            chunk = await asyncio.wait_for(audio_queue.get(), timeout=timeout_seconds)
             frames.append(np.frombuffer(chunk, dtype=np.int16))
         if normalize:
             return normalize_audio(frames)
@@ -167,65 +175,68 @@ async def get_audio_frames(
 
 async def stream_audio_from_queue(audio_queue: asyncio.Queue) -> None:
     """Pulls audio from a thread-safe queue and sends it over the WebSocket."""
-    global IS_LISTENING
     logger.info("Audio streaming task started.")
     try:
         while True:
             try:
-                if not IS_LISTENING:
-                    # Wakeword requires at least 80ms
-                    frames = await get_audio_frames(audio_queue=audio_queue, chunk_ms=20, duration_ms=80, normalize=True)
-                    if frames.size > 0:
-                        prediction = oww_model.predict(frames)
-                        if prediction[WAKEWORD_MODEL] > float(WAKE_WORD_THRESHOLD):
-                            print(
-                                f"Wake word detected! (Score: {prediction[WAKEWORD_MODEL]:.2f})"
-                            )
-                            IS_LISTENING = True
-                else:
-                    async with websockets.connect(
-                        WS_SERVER_URL, **WS_CONFIG
-                    ) as websocket:
-                        logger.info("✅ WebSocket connection established.")
-                        logger.info("🎤 Microphone stream is now active.")
-                        await asyncio.to_thread(play_sound_blocking, CONNECTED)
-                        try:
-                            async with asyncio.TaskGroup() as tg:
-                                tg.create_task(
-                                    handle_server_messages(websocket),
-                                    name="message_handler",
-                                )
-                                tg.create_task(
-                                    stream_audio(websocket, audio_queue),
-                                    name="mic_streamer",
-                                )
-                        except* Exception as eg:
-                            for exc in eg.exceptions:
-                                if not isinstance(
-                                    exc, (ConnectionClosed, asyncio.CancelledError)
-                                ):
-                                    logger.error(
-                                        f"Unhandled exception in task group: {exc!r}",
-                                        exc_info=exc,
+                # Wakeword requires at least 80ms
+                frames = await get_audio_frames(
+                    audio_queue=audio_queue,
+                    chunk_ms=20,
+                    duration_ms=80,
+                    normalize=True,
+                )
+                if frames.size > 0:
+                    prediction = oww_model.predict(frames)
+                    if prediction[WAKEWORD_MODEL] > float(WAKE_WORD_THRESHOLD):
+                        logger.info(
+                            f"Wake word detected! (Score: {prediction[WAKEWORD_MODEL]:.2f})"
+                        )
+                        oww_model.reset()
+                        async with websockets.connect(
+                            WS_SERVER_URL, **WS_CONFIG
+                        ) as websocket:
+                            logger.info("✅ WebSocket connection established.")
+                            logger.info("🎤 Microphone stream is now active.")
+                            await asyncio.to_thread(play_sound_blocking, CONNECTED)
+                            try:
+                                async with asyncio.TaskGroup() as tg:
+                                    tg.create_task(
+                                        handle_server_messages(websocket),
+                                        name="message_handler",
                                     )
-                        finally:
-                            IS_LISTENING = False
-                            logger.info("No longer streaming audio")
+                                    tg.create_task(
+                                        stream_audio(websocket, audio_queue),
+                                        name="mic_streamer",
+                                    )
+                            except* Exception as eg:
+                                for exc in eg.exceptions:
+                                    if not isinstance(
+                                        exc, (ConnectionClosed, asyncio.CancelledError)
+                                    ):
+                                        logger.error(
+                                            f"Unhandled exception in task group: {exc!r}",
+                                            exc_info=exc,
+                                        )
+                            finally:
+                                logger.info("No longer streaming audio")
 
+            except ConnectionRefusedError:
+                logger.warning("Server is offline")
+                await asyncio.to_thread(play_sound_blocking, ERROR)
+                await asyncio.sleep(RECONNECT_DELAY_SECONDS)
             except Exception as e:
                 logger.error(f"Connection failed: {e}.")
-                # await asyncio.to_thread(
-                #     play_sound_blocking, ERROR
-                # )  # No this will be annoying
-                IS_LISTENING = False
-                await asyncio.sleep(RECONNECT_DELAY_SECONDS)
+            finally:
+                clear_queue(audio_queue)
+
+
 
     except asyncio.CancelledError:
         logger.info("Audio streaming task cancelled.")
     except Exception:
         logger.exception("Audio streaming task failed critically.")
         raise
-
 
 
 async def run_client() -> None:
