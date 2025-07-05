@@ -46,7 +46,7 @@ AUDIO_CONFIG = {
 }
 WS_CONFIG = {
     "ping_interval": 20,
-    "ping_timeout": 20,
+    "ping_timeout": 20
 }
 
 # --- Logging Setup ---
@@ -98,7 +98,7 @@ async def handle_server_messages(websocket: websockets.ClientConnection) -> None
             except Exception as e:
                 logger.error(f"Error processing server message: {e}")
 
-    except ConnectionClosed:
+    except ConnectionClosed as ex:
         logger.info("Connection closed")
         raise
     except asyncio.CancelledError:
@@ -113,11 +113,9 @@ async def stream_audio(
 ):
     while True:
         try:
-            frames = await get_audio_frames(
-                audio_queue=audio_queue, chunk_ms=20, duration_ms=20, normalize=True
-            )
+            frames = await audio_queue.get()
             await websocket.send(frames)
-        except ConnectionClosed:
+        except ConnectionClosed as ex:
             logger.info("Connection closed")
             raise
         except asyncio.CancelledError:
@@ -198,7 +196,7 @@ async def stream_audio_from_queue(audio_queue: asyncio.Queue) -> None:
                         ) as websocket:
                             logger.info("✅ WebSocket connection established.")
                             logger.info("🎤 Microphone stream is now active.")
-                            await asyncio.to_thread(play_sound_blocking, CONNECTED)
+                            await asyncio.to_thread(play_sound_blocking, LISTEN_START)
                             try:
                                 async with asyncio.TaskGroup() as tg:
                                     tg.create_task(
@@ -219,6 +217,7 @@ async def stream_audio_from_queue(audio_queue: asyncio.Queue) -> None:
                                             exc_info=exc,
                                         )
                             finally:
+                                await asyncio.to_thread(play_sound_blocking, LISTEN_END)
                                 logger.info("No longer streaming audio")
 
             except ConnectionRefusedError:
