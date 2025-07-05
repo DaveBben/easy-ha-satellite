@@ -52,9 +52,27 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     && rm -rf /var/lib/apt/lists/*
 
 
-# Create a non-root user and group for security
-RUN groupadd --system --gid 1000 appgroup && \
-    useradd --system --uid 1000 --gid appgroup appuser
+# Create a non-root user and add to audio group
+# USER ID
+ARG PUID=1000
+# Group ID       
+ARG PGID=1000
+# Audio group ID       
+ARG AUDIO_GID=50 
+
+ENV PUID=${PUID} \
+    PGID=${PGID} \
+    AUDIO_GID=${AUDIO_GID}
+
+
+RUN set -eux; \
+    # create primary group for the application
+    groupadd --system --gid "${PGID}" appgroup; \
+    # find the group name that already has GID 50
+    AUDIO_GRP="$(getent group ${AUDIO_GID} | cut -d: -f1)"; \
+    # create the user and add it to that group
+    useradd --system --uid "${PUID}" --gid appgroup \
+            --groups "${AUDIO_GRP}" --create-home appuser
 
 WORKDIR /app
 ENV VIRTUAL_ENV=/app/.venv
