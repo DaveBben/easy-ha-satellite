@@ -48,7 +48,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update && apt-get install -y --no-install-recommends \
     python3-pyaudio nano pipewire-audio-client-libraries libpulse0  \
-    pipewire-alsa alsa-utils pipewire-audio pipewire-pulse \
+    pipewire-alsa alsa-utils pipewire-audio pipewire-pulse ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 
