@@ -90,5 +90,5 @@ ENV WAKEWORD_MODEL_NAME=${WAKEWORD_MODEL_NAME}
 USER appuser
 
 
-# CMD ["python3", "main.py"]
-CMD ["bash"]
+CMD ["python3", "main.py"]
+# CMD ["bash"]
