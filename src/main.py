@@ -3,30 +3,34 @@ import json
 import logging
 import os
 from pathlib import Path
-import numpy as np
+from typing import Any
 
+import numpy as np
+import uvloop
 import openwakeword
 import sounddevice as sd
+import soundfile as sf
 import websockets
 from openwakeword.model import Model
-from pydub import AudioSegment
-from pydub.playback import play
-from websockets.exceptions import ConnectionClosed, InvalidStatus
+from websockets.exceptions import ConnectionClosed
 
 # Envrionment Variables
 BASE_URL = os.environ.get("BASE_URL", "192.168.1.16:9292")
-DEVICE_ID = os.environ.get("AUDIO_DEVICE", None)
+INPUT_DEVICE_NAME = os.environ.get("INPUT_AUDIO_DEVICE", None)
 WAKEWORD_MODEL = os.environ.get("WAKEWORD_MODEL_NAME", "hey_jarvis")
 WAKE_WORD_THRESHOLD = os.environ.get("WW_THRESHOLD", "0.5")
 INFERENCE_FRAMEWORK = os.environ.get("INFERENCE_FRAMEWORK", "onnx")
+INFERENCE_THREADS = os.environ.get("INFERENCE_THREADS", os.cpu_count())
 
 # Sound files
 PROJECT_ROOT = Path(__file__).resolve().parent
 SOUND_DIR = PROJECT_ROOT / "sounds"
-LISTEN_START = SOUND_DIR / "listen_start.mp3"
-LISTEN_END = SOUND_DIR / "listen_end.mp3"
-CONNECTED = SOUND_DIR / "connected.mp3"
-ERROR = SOUND_DIR / "failed.mp3"
+AUDIO_CLIPS = {
+    "listen_start": sf.read(SOUND_DIR / "listen_start.wav", dtype="int32"),
+    "listen_end": sf.read(SOUND_DIR / "listen_end.wav", dtype="int32"),
+    "connected": sf.read(SOUND_DIR / "connected.wav", dtype="int32"),
+    "error": sf.read(SOUND_DIR / "failed.wav", dtype="int32"),
+}
 
 # Server
 WS_SERVER_URL = f"ws://{BASE_URL}/stream"
@@ -44,10 +48,7 @@ AUDIO_CONFIG = {
     "dtype": "int16",
     "chunk_ms": 20,
 }
-WS_CONFIG = {
-    "ping_interval": 20,
-    "ping_timeout": 20
-}
+WS_CONFIG = {"ping_interval": 20, "ping_timeout": 20}
 
 # --- Logging Setup ---
 logging.basicConfig(
@@ -56,18 +57,12 @@ logging.basicConfig(
 logger = logging.getLogger("CLIENT")
 
 
-# --- Sound Playback (wrapped for async) ---
-def play_sound_blocking(sound_path: str):
+def play_sound(sound_data: tuple[np.ndarray[Any, np.dtype[Any]]]):
     """A synchronous function that plays a sound file (this will block)."""
     try:
-        # 1. Load the audio file using pydub
-        sound = AudioSegment.from_file(sound_path)
-
-        # 2. Play the sound. pydub will automatically use simpleaudio.
-        play(sound)
-
-    except Exception as e:
-        logger.error(f"Could not play sound {sound_path}: {e}")
+        sd.play(sound_data[0], sound_data[1])
+    except Exception:
+        logger.error("Could not play sound")
 
 
 async def handle_server_messages(websocket: websockets.ClientConnection) -> None:
@@ -82,14 +77,14 @@ async def handle_server_messages(websocket: websockets.ClientConnection) -> None
                 # TODO: Use Structured Events and Match Case
                 if event_type == "listen_started":
                     logger.info("Server started listening")
-                    # Run the blocking playsound() in a separate thread
-                    await asyncio.to_thread(play_sound_blocking, LISTEN_START)
+                    play_sound(AUDIO_CLIPS["listen_start"])
                 elif event_type == "listen_stopped":
                     logger.info("Server stopped listening")
-                    await asyncio.to_thread(play_sound_blocking, LISTEN_END)
+                    play_sound(AUDIO_CLIPS["listen_end"])
                 elif event_type == "action_failed":
                     logger.info("Server Failed to complete action")
-                    await asyncio.to_thread(play_sound_blocking, ERROR)
+                    # TODO: Won't play because listen_stopped plays first
+                    play_sound(AUDIO_CLIPS["error"])
                 else:
                     logger.info(f"Server message: {data}")
 
@@ -98,7 +93,7 @@ async def handle_server_messages(websocket: websockets.ClientConnection) -> None
             except Exception as e:
                 logger.error(f"Error processing server message: {e}")
 
-    except ConnectionClosed as ex:
+    except ConnectionClosed:
         logger.info("Connection closed")
         raise
     except asyncio.CancelledError:
@@ -115,7 +110,7 @@ async def stream_audio(
         try:
             frames = await audio_queue.get()
             await websocket.send(frames)
-        except ConnectionClosed as ex:
+        except ConnectionClosed:
             logger.info("Connection closed")
             raise
         except asyncio.CancelledError:
@@ -123,6 +118,7 @@ async def stream_audio(
         except Exception:
             logger.exception("Message handler encountered a fatal error.")
             raise
+
 
 def clear_queue(q: asyncio.Queue):
     while True:
@@ -185,7 +181,7 @@ async def stream_audio_from_queue(audio_queue: asyncio.Queue) -> None:
                     normalize=True,
                 )
                 if frames.size > 0:
-                    prediction = oww_model.predict(frames)
+                    prediction = await asyncio.get_event_loop().run_in_executor(None, oww_model.predict, frames)
                     if prediction[WAKEWORD_MODEL] > float(WAKE_WORD_THRESHOLD):
                         logger.info(
                             f"Wake word detected! (Score: {prediction[WAKEWORD_MODEL]:.2f})"
@@ -196,7 +192,8 @@ async def stream_audio_from_queue(audio_queue: asyncio.Queue) -> None:
                         ) as websocket:
                             logger.info("✅ WebSocket connection established.")
                             logger.info("🎤 Microphone stream is now active.")
-                            await asyncio.to_thread(play_sound_blocking, LISTEN_START)
+                            play_sound(AUDIO_CLIPS["listen_start"])
+
                             try:
                                 async with asyncio.TaskGroup() as tg:
                                     tg.create_task(
@@ -217,19 +214,17 @@ async def stream_audio_from_queue(audio_queue: asyncio.Queue) -> None:
                                             exc_info=exc,
                                         )
                             finally:
-                                await asyncio.to_thread(play_sound_blocking, LISTEN_END)
+                                play_sound(AUDIO_CLIPS["listen_end"])
                                 logger.info("No longer streaming audio")
 
             except ConnectionRefusedError:
                 logger.warning("Server is offline")
-                await asyncio.to_thread(play_sound_blocking, ERROR)
+                play_sound(AUDIO_CLIPS["error"])
                 await asyncio.sleep(RECONNECT_DELAY_SECONDS)
             except Exception as e:
                 logger.error(f"Connection failed: {e}.")
             finally:
                 clear_queue(audio_queue)
-
-
 
     except asyncio.CancelledError:
         logger.info("Audio streaming task cancelled.")
@@ -259,7 +254,7 @@ async def run_client() -> None:
                 channels=AUDIO_CONFIG["channels"],
                 dtype=AUDIO_CONFIG["dtype"],
                 callback=audio_callback,
-                device=DEVICE_ID,
+                device=INPUT_DEVICE_NAME,
                 blocksize=int(
                     AUDIO_CONFIG["sample_rate"] * AUDIO_CONFIG["chunk_ms"] / 1000
                 ),
@@ -288,11 +283,14 @@ def main() -> None:
         print("Available audio input devices:")
         print(sd.query_devices())
         print("-" * 50)
-        if DEVICE_ID:
-            logger.info(f"Attempting to use specified audio device: {DEVICE_ID}")
+        if INPUT_DEVICE_NAME:
+            logger.info(
+                f"Attempting to use specified audio device: {INPUT_DEVICE_NAME}"
+            )
         else:
             logger.info("Using default audio device.")
-        asyncio.run(run_client())
+        with asyncio.Runner(loop_factory=uvloop.new_event_loop) as runner:
+            runner.run(run_client())
     except KeyboardInterrupt:
         logger.info("Client stopped by user")
     except Exception:
