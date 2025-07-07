@@ -157,10 +157,8 @@ async def get_audio_frames(
         for _ in range(num_chunks):
             chunk = await asyncio.wait_for(audio_queue.get(), timeout=timeout_seconds)
             frames.append(np.frombuffer(chunk, dtype=np.int16))
-        if normalize:
-            pass
-        else:
-            return frames
+        # skip normalize for now
+        return frames
 
     except TimeoutError:
         logger.debug("Did not receive expected audio chunk from client in time.")
