@@ -11,7 +11,7 @@ services:
       - BASE_URL=192.168.1.16:9292
       - WAKEWORD_MODEL_NAME=hey_jarvis
       - WW_THRESHOLD=0.5
-      - INFERENCE_FRAMEWORK=onnx
+      - INFERENCE_FRAMEWORK=tflite
       - PUID=${UID}
       - PGID=${GID}
       - AUDIO_GID=${AUDIO_GID}
