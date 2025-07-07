@@ -60,7 +60,7 @@ logger = logging.getLogger("CLIENT")
 def play_sound(sound_data: tuple[np.ndarray[Any, np.dtype[Any]]]):
     """A synchronous function that plays a sound file (this will block)."""
     try:
-        sd.play(sound_data[0], sound_data[1], blocking=True)
+        sd.play(sound_data[0], sound_data[1])
     except Exception:
         logger.error("Could not play sound")
 
@@ -158,7 +158,8 @@ async def get_audio_frames(
             chunk = await asyncio.wait_for(audio_queue.get(), timeout=timeout_seconds)
             frames.append(np.frombuffer(chunk, dtype=np.int16))
         if normalize:
-            return normalize_audio(frames)
+            pass
+            # return normalize_audio(frames)
 
     except TimeoutError:
         logger.debug("Did not receive expected audio chunk from client in time.")
