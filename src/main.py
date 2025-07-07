@@ -6,10 +6,10 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-import uvloop
 import openwakeword
 import sounddevice as sd
 import soundfile as sf
+import uvloop
 import websockets
 from openwakeword.model import Model
 from websockets.exceptions import ConnectionClosed
@@ -41,6 +41,11 @@ openwakeword.utils.download_models(model_names=[WAKEWORD_MODEL])
 oww_model = Model(
     wakeword_models=[WAKEWORD_MODEL], inference_framework=INFERENCE_FRAMEWORK
 )
+
+# Buffer for AUdio
+_MAX_MS = 160  # longest window we will grab at once
+_MAX_FRAMES = 16_000 * _MAX_MS // 1000  # 16 kHz mono
+_buffer = np.empty(_MAX_FRAMES, dtype=np.int16)  # ≈ 320 kB
 
 AUDIO_CONFIG = {
     "sample_rate": 16000,
@@ -145,43 +150,55 @@ def normalize_audio(audio_data: list) -> np.ndarray:
 
 
 async def get_audio_frames(
-    audio_queue: asyncio.Queue, chunk_ms: int, duration_ms: int, normalize: bool = False
+    audio_queue: asyncio.Queue[bytes],
+    chunk_ms: int,
+    duration_ms: int,
+    normalize: bool = False,  # kept for API compatibility
 ) -> np.ndarray:
-    num_chunks = duration_ms // chunk_ms
-    if num_chunks == 0:
-        return np.array([], dtype=np.int16)
+    """Return *duration_ms* of int16 PCM as a SLICE view into a
+    pre-allocated workspace.  **No allocations, no list building.**"""
+    n_chunks = duration_ms // chunk_ms
+    if n_chunks == 0:
+        return _buffer[:0]  # empty view; zero alloc
 
-    frames = []
+    timeout = chunk_ms * 1.5 / 1000.0
+    write = 0
+
     try:
-        timeout_seconds = (chunk_ms * 1.5) / 1000.0
-        for _ in range(num_chunks):
-            chunk = await asyncio.wait_for(audio_queue.get(), timeout=timeout_seconds)
-            frames.append(np.frombuffer(chunk, dtype=np.int16))
-        # skip normalize for now
-        return frames
+        for _ in range(n_chunks):
+            chunk = await asyncio.wait_for(audio_queue.get(), timeout=timeout)
+
+            view = memoryview(chunk).cast("h")  # bytes → int16  (no copy)
+            ln = view.shape[0]
+            _buffer[write : write + ln] = view  # memcpy once
+            write += ln
 
     except TimeoutError:
-        logger.debug("Did not receive expected audio chunk from client in time.")
-        if not frames:
-            return np.array([], dtype=np.int16)
-        return np.concatenate(frames)
+        if write == 0:
+            return _buffer[:0]
+
+    return _buffer[:write]
 
 
 async def stream_audio_from_queue(audio_queue: asyncio.Queue) -> None:
     """Pulls audio from a thread-safe queue and sends it over the WebSocket."""
     logger.info("Audio streaming task started.")
+    loop = asyncio.get_running_loop()
     try:
         while True:
             try:
                 # Wakeword requires at least 80ms
-                frames = await get_audio_frames(
+                frames_view = await get_audio_frames(
                     audio_queue=audio_queue,
                     chunk_ms=20,
                     duration_ms=80,
                     normalize=True,
                 )
-                if frames.size > 0:
-                    prediction = await asyncio.get_event_loop().run_in_executor(None, oww_model.predict, frames)
+                if frames_view.size > 0:
+                    frames = frames_view.copy()
+                    prediction = await loop.run_in_executor(
+                        None, oww_model.predict, frames
+                    )
                     if prediction[WAKEWORD_MODEL] > float(WAKE_WORD_THRESHOLD):
                         logger.info(
                             f"Wake word detected! (Score: {prediction[WAKEWORD_MODEL]:.2f})"
