@@ -159,7 +159,8 @@ async def get_audio_frames(
             frames.append(np.frombuffer(chunk, dtype=np.int16))
         if normalize:
             pass
-            # return normalize_audio(frames)
+        else:
+            return frames
 
     except TimeoutError:
         logger.debug("Did not receive expected audio chunk from client in time.")
