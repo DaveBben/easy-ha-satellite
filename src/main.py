@@ -192,7 +192,6 @@ async def stream_audio_from_queue(audio_queue: asyncio.Queue) -> None:
                         ) as websocket:
                             logger.info("✅ WebSocket connection established.")
                             logger.info("🎤 Microphone stream is now active.")
-                            play_sound(AUDIO_CLIPS["listen_start"])
 
                             try:
                                 async with asyncio.TaskGroup() as tg:
