@@ -145,7 +145,7 @@ def normalize_audio(audio_data: list) -> np.ndarray:
 
 
 async def get_audio_frames(
-    audio_queue: asyncio.Queue, chunk_ms: int, duration_ms: int, normalize: bool = True
+    audio_queue: asyncio.Queue, chunk_ms: int, duration_ms: int, normalize: bool = False
 ) -> np.ndarray:
     num_chunks = duration_ms // chunk_ms
     if num_chunks == 0:
