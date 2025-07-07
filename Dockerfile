@@ -68,7 +68,7 @@ ENV PUID=${PUID} \
 RUN set -eux; \
     # create primary group for the application
     groupadd --system --gid "${PGID}" appgroup; \
-    # find the group name that already has GID 50
+    # find the group name that already has GID
     AUDIO_GRP="$(getent group ${AUDIO_GID} | cut -d: -f1)"; \
     # create the user and add it to that group
     useradd --system --uid "${PUID}" --gid appgroup \

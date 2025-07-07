@@ -18,9 +18,5 @@ services:
     devices:
       - /dev/snd
     restart: unless-stopped
-    ports:
-      - "8700:8700" # Push Notifications
     group_add:   
       - ${AUDIO_GID}
-    stdin_open: true
-    tty: true
