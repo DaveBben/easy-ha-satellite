@@ -21,6 +21,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     libportaudio2 \ 
     libportaudiocpp0 \
     libc6-dev \
+    build-essential \
+    swig \
     && rm -rf /var/lib/apt/lists/*
 
 

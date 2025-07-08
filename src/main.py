@@ -47,11 +47,15 @@ _MAX_MS = 160  # longest window we will grab at once
 _MAX_FRAMES = 16_000 * _MAX_MS // 1000  # 16 kHz mono
 _buffer = np.empty(_MAX_FRAMES, dtype=np.int16)  # ≈ 320 kB
 
+# Preprocessing
+
+
+
 AUDIO_CONFIG = {
     "sample_rate": 16000,
     "channels": 1,
     "dtype": "int16",
-    "chunk_ms": 20,
+    "chunk_ms": 10,
 }
 WS_CONFIG = {"ping_interval": 20, "ping_timeout": 20}
 
@@ -65,7 +69,7 @@ logger = logging.getLogger("CLIENT")
 def play_sound(sound_data: tuple[np.ndarray[Any, np.dtype[Any]]]):
     """A synchronous function that plays a sound file (this will block)."""
     try:
-        sd.play(sound_data[0], sound_data[1])
+        sd.play(sound_data[0], sound_data[1], blocking=True)
     except Exception:
         logger.error("Could not play sound")
 
@@ -133,21 +137,6 @@ def clear_queue(q: asyncio.Queue):
             break
 
 
-def normalize_audio(audio_data: list) -> np.ndarray:
-    # Normalize to prevent clipping
-    audio_array = np.concatenate(audio_data).astype(np.int16)
-    # Convert to float32 and normalize to [-1.0, 1.0] range
-    audio_float = audio_array.astype(np.float32) / 32768.0
-
-    # Apply gain reduction if needed to prevent clipping
-    max_val = np.max(np.abs(audio_float))
-    if max_val > 0.7:  # If signal is too loud
-        audio_float = audio_float * (0.7 / max_val)
-
-    # Convert back to 16-bit integer array
-    audio_int16 = (audio_float * 32768.0).astype(np.int16)
-    return audio_int16
-
 
 async def get_audio_frames(
     audio_queue: asyncio.Queue[bytes],
@@ -190,7 +179,7 @@ async def stream_audio_from_queue(audio_queue: asyncio.Queue) -> None:
                 # Wakeword requires at least 80ms
                 frames_view = await get_audio_frames(
                     audio_queue=audio_queue,
-                    chunk_ms=20,
+                    chunk_ms=AUDIO_CONFIG['chunk_ms'],
                     duration_ms=80,
                     normalize=True,
                 )
