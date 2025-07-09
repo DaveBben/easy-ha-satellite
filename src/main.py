@@ -5,7 +5,6 @@ import multiprocessing as mp
 import os
 import queue
 import time
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -18,16 +17,13 @@ import websockets
 from openwakeword.model import Model
 from websockets.exceptions import ConnectionClosed
 
-pool = ThreadPoolExecutor(max_workers=1)
-
-# Envrionment Variables
+# Environment Variables
 BASE_URL = os.environ.get("BASE_URL", "192.168.1.16:9292")
 INPUT_DEVICE_NAME = os.environ.get("INPUT_AUDIO_DEVICE", None)
 OUTPUT_DEVICE_NAME = os.environ.get("OUTPUT_DEVICE_NAME", None)
 WAKEWORD_MODEL = os.environ.get("WAKEWORD_MODEL_NAME", "hey_jarvis")
 WAKE_WORD_THRESHOLD = float(os.environ.get("WW_THRESHOLD", "0.5"))
 INFERENCE_FRAMEWORK = os.environ.get("INFERENCE_FRAMEWORK", "onnx")
-INFERENCE_THREADS = os.environ.get("INFERENCE_THREADS", os.cpu_count())
 
 # Audio Config
 AUDIO_CONFIG = {
@@ -122,7 +118,7 @@ def play_sound(sound_data: tuple[np.ndarray[Any, np.dtype[Any]]]):
     try:
         # sd.play(sound_data[0], sound_data[1], blocking=False)
         _output_stream.write(sound_data[0])
-    except Exception as ex:
+    except Exception:
         logger.error("Could not play sound")
 
 
