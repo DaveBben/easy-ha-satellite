@@ -23,6 +23,7 @@ pool = ThreadPoolExecutor(max_workers=1)
 # Envrionment Variables
 BASE_URL = os.environ.get("BASE_URL", "192.168.1.16:9292")
 INPUT_DEVICE_NAME = os.environ.get("INPUT_AUDIO_DEVICE", None)
+OUTPUT_DEVICE_NAME = os.environ.get("OUTPUT_DEVICE_NAME", None)
 WAKEWORD_MODEL = os.environ.get("WAKEWORD_MODEL_NAME", "hey_jarvis")
 WAKE_WORD_THRESHOLD = float(os.environ.get("WW_THRESHOLD", "0.5"))
 INFERENCE_FRAMEWORK = os.environ.get("INFERENCE_FRAMEWORK", "onnx")
@@ -41,10 +42,10 @@ AUDIO_CONFIG = {
 PROJECT_ROOT = Path(__file__).resolve().parent
 SOUND_DIR = PROJECT_ROOT / "sounds"
 AUDIO_CLIPS = {
-    "listen_start": sf.read(SOUND_DIR / "listen_start.wav", dtype="int32"),
-    "listen_end": sf.read(SOUND_DIR / "listen_end.wav", dtype="int32"),
-    "connected": sf.read(SOUND_DIR / "connected.wav", dtype="int32"),
-    "error": sf.read(SOUND_DIR / "failed.wav", dtype="int32"),
+    "listen_start": sf.read(SOUND_DIR / "listen_start.wav", dtype="int16"),
+    "listen_end": sf.read(SOUND_DIR / "listen_end.wav", dtype="int16"),
+    "connected": sf.read(SOUND_DIR / "connected.wav", dtype="int16"),
+    "error": sf.read(SOUND_DIR / "failed.wav", dtype="int16"),
 }
 
 # Server
@@ -55,6 +56,16 @@ WS_CONFIG = {"ping_interval": 20, "ping_timeout": 20}
 # WakeWord
 REQUIRED_WAKEWORD_MS = 80
 COOLDOWN_MS = 3000
+
+
+_output_stream = sd.OutputStream(
+    samplerate=48000,
+    channels=2,
+    device=OUTPUT_DEVICE_NAME,
+    dtype="int16",
+    latency=0.01,
+)
+_output_stream.start()
 
 
 # --- Logging Setup ---
@@ -109,8 +120,9 @@ def wakeword_process_worker(
 def play_sound(sound_data: tuple[np.ndarray[Any, np.dtype[Any]]]):
     """A synchronous function that plays a sound file (this will block)."""
     try:
-        sd.play(sound_data[0], sound_data[1], blocking=False)
-    except Exception:
+        # sd.play(sound_data[0], sound_data[1], blocking=False)
+        _output_stream.write(sound_data[0])
+    except Exception as ex:
         logger.error("Could not play sound")
 
 
