@@ -109,7 +109,7 @@ def wakeword_process_worker(
 def play_sound(sound_data: tuple[np.ndarray[Any, np.dtype[Any]]]):
     """A synchronous function that plays a sound file (this will block)."""
     try:
-        sd.play(sound_data[0], sound_data[1], blocking=True)
+        sd.play(sound_data[0], sound_data[1], blocking=False)
     except Exception:
         logger.error("Could not play sound")
 
