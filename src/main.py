@@ -20,7 +20,7 @@ from websockets.exceptions import ConnectionClosed
 # Environment Variables
 BASE_URL = os.environ.get("BASE_URL", "192.168.1.16:9292")
 INPUT_DEVICE_NAME = os.environ.get("INPUT_AUDIO_DEVICE", None)
-OUTPUT_DEVICE_NAME = os.environ.get("OUTPUT_DEVICE_NAME", None)
+OUTPUT_DEVICE_NAME = os.environ.get("OUTPUT_AUDIO_DEVICE", None)
 WAKEWORD_MODEL = os.environ.get("WAKEWORD_MODEL_NAME", "hey_jarvis")
 WAKE_WORD_THRESHOLD = float(os.environ.get("WW_THRESHOLD", "0.5"))
 INFERENCE_FRAMEWORK = os.environ.get("INFERENCE_FRAMEWORK", "onnx")
@@ -271,7 +271,11 @@ def main() -> None:
         print("-" * 50)
         if INPUT_DEVICE_NAME:
             logger.info(
-                f"Attempting to use specified audio device: {INPUT_DEVICE_NAME}"
+                f"Attempting to use specified input device: {INPUT_DEVICE_NAME}"
+            )
+        if OUTPUT_DEVICE_NAME:
+            logger.info(
+                f"Attempting to use specified output device: {OUTPUT_DEVICE_NAME}"
             )
         else:
             logger.info("Using default audio device.")
