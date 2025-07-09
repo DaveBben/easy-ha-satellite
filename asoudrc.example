@@ -1,0 +1,21 @@
+# Set default ALSA output to UACDemoV1.0 (card 1)
+# Set default ALSA input to USB audio CODEC (card 2)
+
+pcm.!default {
+    type asym
+    playback.pcm {
+        type hw
+        card 1  # UACDemoV1.0
+        device 0
+    }
+    capture.pcm {
+        type hw
+        card 2  # USB audio CODEC
+        device 0
+    }
+}
+
+ctl.!default {
+    type hw
+    card 1  # Control also directed to UACDemoV1.0
+}
