@@ -16,7 +16,7 @@ services:
       - OUTPUT_AUDIO_DEVICE: UACDemoV1.0
       - PUID: ${UID}
       - PGID: ${GID}
-      - AUDIO_GID:${AUDIO_GID}
+      - AUDIO_GID: ${AUDIO_GID}
     devices:
       - /dev/snd
     restart: unless-stopped
