@@ -89,18 +89,6 @@ COPY --chown=appuser:appgroup src/ .
 ARG WAKEWORD_MODEL_NAME=hey_jarvis
 ENV WAKEWORD_MODEL_NAME=${WAKEWORD_MODEL_NAME}
 
-# TODO: Make this more general so it works on different hw nums
-RUN printf '%s\n' \
-'pcm.!default {' \
-'  type plug' \
-'  slave.pcm "hw:2,0"' \
-'}' \
-'ctl.!default {' \
-'  type hw' \
-'  card 2' \
-'}' > /etc/asound.conf
-RUN chmod 644 /etc/asound.conf
-
 
 USER appuser
 

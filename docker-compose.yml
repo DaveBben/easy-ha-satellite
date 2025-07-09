@@ -6,14 +6,15 @@ services:
         PUID: ${UID}
         PGID: ${GID}
         AUDIO_GID: ${AUDIO_GID}
-        WAKEWORD_MODEL_NAME: hey_jarvis 
+        WAKEWORD_MODEL_NAME: hey_jarvis
+    volumes:
+      - /home/dave/.asoundrc:/etc/asound.conf
+      -  pipewire_socket:/run/pipewire
     environment:
       BASE_URL: 192.168.1.16:9292
       WAKEWORD_MODEL_NAME: hey_jarvis
       WW_THRESHOLD: 0.5
       INFERENCE_FRAMEWORK: onnx
-      INPUT_AUDIO_DEVICE: "USB audio CODEC"
-      OUTPUT_AUDIO_DEVICE: "UACDemoV1.0"
       PUID: ${UID}
       PGID: ${GID}
       AUDIO_GID: ${AUDIO_GID}
