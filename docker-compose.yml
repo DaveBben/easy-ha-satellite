@@ -10,7 +10,9 @@ services:
     volumes:
       - /home/dave/.asoundrc:/etc/asound.conf
     environment:
-      BASE_URL: 192.168.1.16:9292
+      BASE_URL: 192.168.1.49:8123
+      HASS_TOKEN: ${HASS_TOKEN}
+      SECURE_WEBSOCKET: "false"
       WAKEWORD_MODEL_NAME: hey_jarvis
       WW_THRESHOLD: 0.5
       INFERENCE_FRAMEWORK: onnx
