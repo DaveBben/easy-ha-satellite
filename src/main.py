@@ -5,17 +5,19 @@ and to handle intents.
 """
 
 import asyncio
+import io
 import json
 import logging
 import multiprocessing as mp
 import os
 import queue
+import threading
 from multiprocessing.synchronize import Event
 from pathlib import Path
-from typing import Any
 
 import numpy as np
 import openwakeword
+import requests
 import sounddevice as sd
 import soundfile as sf
 import uvloop
@@ -64,10 +66,13 @@ REQUIRED_WAKEWORD_MS = 80
 COOLDOWN_MS = 3000
 WAKEWORD_EVENT = "WAKEWORD_DETECTED"
 
-
+# Output Audio
+OUTPUT_SR = 48_000
+OUTPUT_CH = 2
+_play_lock = threading.Lock()
 _output_stream = sd.OutputStream(
-    samplerate=48000,
-    channels=2,
+    samplerate=OUTPUT_SR,
+    channels=OUTPUT_CH,
     device=OUTPUT_DEVICE_NAME,
     dtype="int16",
     latency=0.01,
@@ -123,11 +128,45 @@ def wakeword_process_worker(
             logger.error("Error in Keyword detection process", exc_info=True)
 
 
-def play_sound(sound_data: tuple[np.ndarray[Any, np.dtype[Any]]]):
-    try:
-        _output_stream.write(sound_data[0])
-    except Exception:
-        logger.error("Could not play sound")
+def _to_output_format(data: np.ndarray, sr: int) -> np.ndarray:
+    # Resample if needed
+    if sr != OUTPUT_SR:
+        ratio = OUTPUT_SR / sr
+        idx = (np.arange(int(len(data) * ratio)) / ratio).astype(np.int32)
+        idx = np.clip(idx, 0, len(data) - 1)
+        data = data[idx]
+
+    # Mono -> stereo
+    if data.ndim == 1 or data.shape[1] == 1:
+        data = np.repeat(data.reshape(-1, 1), OUTPUT_CH, axis=1)
+
+    return data.astype("int16", copy=False)
+
+
+def play_sound(sound_obj: tuple):
+    """
+    Accepts:
+      * tuple (np.ndarray, samplerate)  like what sf.read returns
+    """
+    pcm, sr = sound_obj  # assume (array, sr)
+    pcm = _to_output_format(pcm, sr)
+
+    with _play_lock:
+        _output_stream.write(pcm)
+
+
+def download_tts_bytes(path: str, chunk_size: int = 8192) -> bytes:
+    url = f"http://{BASE_URL}{path}"
+    logger.debug(f"Grabbing audio from: {url}")
+    headers = {"Authorization": f"Bearer {HASS_TOKEN}"}
+    buf = bytearray()
+    with requests.get(url, headers=headers, stream=True, timeout=15) as r:
+        r.raise_for_status()
+        for chunk in r.iter_content(chunk_size=chunk_size):
+            if not chunk:
+                continue
+            buf.extend(chunk)
+    return bytes(buf)
 
 
 async def handle_server_messages(
@@ -158,7 +197,7 @@ async def handle_server_messages(
                                     "type": "assist_pipeline/run",
                                     "start_stage": "stt",
                                     "timeout": PIPELINE_TIMEOUT_SECS,
-                                    "end_stage": "intent",
+                                    "end_stage": "tts",
                                     "input": {
                                         "sample_rate": AUDIO_CONFIG["sample_rate"]
                                     },
@@ -169,6 +208,7 @@ async def handle_server_messages(
                     case {"event": {"type": "stt-start"}}:
                         play_sound(AUDIO_CLIPS["listen_start"])
                         stt_active.set()
+
                     # Speech to Text Complete
                     case {"event": {"type": "stt-end"}}:
                         try:
@@ -177,7 +217,8 @@ async def handle_server_messages(
                         except KeyError:
                             logger.warning("STT complete, but no phrase transcribed")
                         stt_active.clear()
-                    # Error
+
+                    # Pipeline Error
                     case {"event": {"type": "error"}}:
                         try:
                             err_msg = data["event"]["data"]["message"]
@@ -188,7 +229,19 @@ async def handle_server_messages(
                             )
                         stt_active.clear()
                         play_sound(AUDIO_CLIPS["error"])
+                        break
 
+                    # Audio Response Available
+                    case {"event": {"type": "tts-end"}}:
+                        try:
+                            media_url = data["event"]["data"]["tts_output"]["url"]
+                            audio_mp3 = download_tts_bytes(media_url)
+                            pcm, sr = sf.read(io.BytesIO(audio_mp3), dtype="int16")
+                            play_sound((pcm, sr))
+                        except Exception as ex:
+                            logger.warning(f"Failed to play output media: {ex}")
+                        finally:
+                            break
                     # Action Successful
                     case {
                         "event": {
@@ -200,7 +253,7 @@ async def handle_server_messages(
                         }
                     }:
                         play_sound(AUDIO_CLIPS["task_complete"])
-                        break
+                        # break
 
                     # Action Failed
                     case {
@@ -213,7 +266,7 @@ async def handle_server_messages(
                         }
                     }:
                         play_sound(AUDIO_CLIPS["error"])
-                        break
+                        # break
 
                     case _:
                         logger.debug(f"Server message: {data}")
