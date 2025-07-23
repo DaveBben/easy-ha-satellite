@@ -12,8 +12,11 @@ import multiprocessing as mp
 import os
 import queue
 import threading
+from dataclasses import dataclass
+from enum import Enum
 from multiprocessing.synchronize import Event
 from pathlib import Path
+from typing import Any, Optional
 
 import numpy as np
 import openwakeword
@@ -87,9 +90,24 @@ logging.basicConfig(
 logger = logging.getLogger("CLIENT")
 
 
+# Application events
+class ServerEventType(Enum):
+    STT_STARTED = "stt_started"
+    STT_COMPLETED = "stt_completed"
+    ACTION_FAILED = "action_failed"
+    TTS_COMPLETED = "tts_completed"
+    ACTION_SUCCESS = "action_success"
+
+
+@dataclass
+class ServerEvent:
+    type: ServerEventType
+    data: Optional[Any] = None
+
+
 def wakeword_process_worker(
-    audio_q: mp.Queue,
-    event_q: mp.Queue,
+    in_audio_q: mp.Queue,
+    app_event_q: mp.Queue,
     model_name: str,
     inference_framework: str,
     shutdown_event: Event,
@@ -107,7 +125,7 @@ def wakeword_process_worker(
         try:
             wake_word_run_event.wait()
             while wake_word_run_event.is_set():
-                chunk = audio_q.get(timeout=AUDIO_CONFIG["chunk_ms"] / 1000)
+                chunk = in_audio_q.get(timeout=AUDIO_CONFIG["chunk_ms"] / 1000)
                 if chunk is None:  # Sentinel value to stop the process
                     break
                 # Wakeword Prediction
@@ -116,7 +134,7 @@ def wakeword_process_worker(
                     logger.info(
                         f"Wakeword detected! (Score: {prediction[model_name]:.2f})"
                     )
-                    event_q.put(WAKEWORD_EVENT)
+                    app_event_q.put(WAKEWORD_EVENT)
                     oww_model.reset()
 
         except queue.Empty:
@@ -143,16 +161,65 @@ def _to_output_format(data: np.ndarray, sr: int) -> np.ndarray:
     return data.astype("int16", copy=False)
 
 
-def play_sound(sound_obj: tuple):
-    """
-    Accepts:
-      * tuple (np.ndarray, samplerate)  like what sf.read returns
-    """
-    pcm, sr = sound_obj  # assume (array, sr)
-    pcm = _to_output_format(pcm, sr)
+async def play_sound_task(out_audio_q: asyncio.Queue):
+    loop = asyncio.get_running_loop()
+    logger.info("Streaming Out task started")
+    try:
+        while True:
+            audio, sr = await out_audio_q.get()
+            pcm = _to_output_format(audio, sr)
+            if not _output_stream.active:
+                _output_stream.start()
+            try:
+                await loop.run_in_executor(None, _output_stream.write, pcm)
+            except sd.PortAudioError as e:
+                # Expected because we abort
+                logger.debug(e)
+    except asyncio.CancelledError:
+        logger.info("play sound task stopped")
+    except Exception:
+        logger.exception("Play sound task encountered a fatal error.")
+        raise
 
-    with _play_lock:
-        _output_stream.write(pcm)
+
+async def handle_server_events_task(
+    event_q: asyncio.Queue, out_audio_q: asyncio.Queue, stream_audio: asyncio.Event
+):
+    logger.info("Handle Events Task Started")
+    try:
+        while True:
+            event: ServerEvent = await event_q.get()
+            match event.type:
+                case ServerEventType.STT_STARTED:
+                    await out_audio_q.put(AUDIO_CLIPS["listen_start"])
+                    # Set flag that audio stream is ready
+                    stream_audio.set()
+                case ServerEventType.STT_COMPLETED:
+                    # Stop Audio Stream
+                    stream_audio.clear()
+                    logger.info(f"Phrase: {event.data}")
+                case ServerEventType.ACTION_SUCCESS:
+                    await out_audio_q.put(AUDIO_CLIPS["task_complete"])
+                case ServerEventType.ACTION_FAILED:
+                    await out_audio_q.put(AUDIO_CLIPS["error"])
+                    logger.warning(event.data)
+                    stream_audio.clear()
+                    # Stop Processing Events
+                    break
+                case ServerEventType.TTS_COMPLETED:
+                    media_url = event.data
+                    audio_mp3 = download_tts_bytes(media_url)
+                    pcm, sr = sf.read(io.BytesIO(audio_mp3), dtype="int16")
+                    await out_audio_q.put((pcm, sr))
+                    # Stop Processing Events
+                    break
+                case _:
+                    pass
+    except asyncio.CancelledError:
+        logger.info("Handle Events task stopped")
+    except Exception:
+        logger.exception("Handle Events task encountered a fatal error.")
+        raise
 
 
 def download_tts_bytes(path: str, chunk_size: int = 8192) -> bytes:
@@ -169,8 +236,8 @@ def download_tts_bytes(path: str, chunk_size: int = 8192) -> bytes:
     return bytes(buf)
 
 
-async def handle_server_messages(
-    websocket: websockets.ClientConnection, stt_active: asyncio.Event
+async def handle_server_msg_task(
+    websocket: websockets.ClientConnection, event_q: asyncio.Queue
 ) -> None:
     """Handle incoming messages from the server and play sounds."""
     logger.info("Message handler task started.")
@@ -206,42 +273,49 @@ async def handle_server_messages(
                         )
                     # Speech to text started
                     case {"event": {"type": "stt-start"}}:
-                        play_sound(AUDIO_CLIPS["listen_start"])
-                        stt_active.set()
+                        await event_q.put(ServerEvent(type=ServerEventType.STT_STARTED))
 
                     # Speech to Text Complete
                     case {"event": {"type": "stt-end"}}:
                         try:
                             phrase = data["event"]["data"]["stt_output"]["text"]
-                            logger.info(f"Command: {phrase}")
+                            await event_q.put(
+                                ServerEvent(
+                                    type=ServerEventType.STT_COMPLETED, data=phrase
+                                )
+                            )
                         except KeyError:
                             logger.warning("STT complete, but no phrase transcribed")
-                        stt_active.clear()
 
                     # Pipeline Error
                     case {"event": {"type": "error"}}:
                         try:
                             err_msg = data["event"]["data"]["message"]
-                            logger.warning(err_msg)
+                            await event_q.put(
+                                ServerEvent(
+                                    type=ServerEventType.ACTION_FAILED, data=err_msg
+                                )
+                            )
                         except KeyError:
                             logger.warning(
-                                "Pipeline Error but could not retrieve reponse"
+                                "Pipeline Error but could not retrieve response"
                             )
-                        stt_active.clear()
-                        play_sound(AUDIO_CLIPS["error"])
                         break
 
                     # Audio Response Available
                     case {"event": {"type": "tts-end"}}:
                         try:
                             media_url = data["event"]["data"]["tts_output"]["url"]
-                            audio_mp3 = download_tts_bytes(media_url)
-                            pcm, sr = sf.read(io.BytesIO(audio_mp3), dtype="int16")
-                            play_sound((pcm, sr))
+                            await event_q.put(
+                                ServerEvent(
+                                    type=ServerEventType.TTS_COMPLETED, data=media_url
+                                )
+                            )
                         except Exception as ex:
                             logger.warning(f"Failed to play output media: {ex}")
                         finally:
                             break
+
                     # Action Successful
                     case {
                         "event": {
@@ -252,8 +326,9 @@ async def handle_server_messages(
                             }
                         }
                     }:
-                        play_sound(AUDIO_CLIPS["task_complete"])
-                        # break
+                        await event_q.put(
+                            ServerEvent(type=ServerEventType.ACTION_SUCCESS)
+                        )
 
                     # Action Failed
                     case {
@@ -265,9 +340,9 @@ async def handle_server_messages(
                             }
                         }
                     }:
-                        play_sound(AUDIO_CLIPS["error"])
-                        # break
-
+                        await event_q.put(
+                            ServerEvent(type=ServerEventType.ACTION_FAILED)
+                        )
                     case _:
                         logger.debug(f"Server message: {data}")
 
@@ -287,17 +362,17 @@ async def handle_server_messages(
         raise
 
 
-async def stream_audio(
+async def stream_audio_task(
     websocket: websockets.ClientConnection,
-    audio_q: mp.Queue,
-    stt_active: asyncio.Event,
+    in_audio_q: mp.Queue,
+    stream_audio: asyncio.Event,
 ):
     loop = asyncio.get_running_loop()
     try:
-        await stt_active.wait()
+        await stream_audio.wait()
         logger.info("🎤 Microphone stream is now active.")
-        while stt_active.is_set():
-            chunk = await loop.run_in_executor(None, audio_q.get)
+        while stream_audio.is_set():
+            chunk = await loop.run_in_executor(None, in_audio_q.get)
             if chunk is None:
                 break
             # Need to send handler ID as part of audio
@@ -308,22 +383,27 @@ async def stream_audio(
     except asyncio.CancelledError:
         logger.info("stream audio tasks stopped")
     except Exception:
-        logger.exception("Message handler encountered a fatal error.")
+        logger.exception("Stream Audio task encountered a fatal error.")
         raise
     finally:
         logger.info("🛑 Microphone stream is now stopped")
 
 
-async def listen_for_wakeword(
-    audio_queue: mp.Queue,
-    event_queue: mp.Queue,
+async def handle_app_events(
+    in_audio_q: mp.Queue,
+    out_audio_q: asyncio.Queue,
+    app_event_queue: mp.Queue,
     shutdown_event: Event,
     wake_word_run_event: Event,
 ) -> None:
     """Waits for a wakeword detection event and then manages the server interaction."""
     loop = asyncio.get_running_loop()
-    stt_active = asyncio.Event()
+
+    # Start Wakeword Loop
     wake_word_run_event.set()
+
+    stream_audio = asyncio.Event()
+    server_event_q = asyncio.Queue()
 
     # Create Server URL
     server_url = f"wss://{WS_SERVER_URL}"
@@ -333,22 +413,34 @@ async def listen_for_wakeword(
 
     # Main Loop
     while not shutdown_event.is_set():
-        event = await loop.run_in_executor(None, event_queue.get)
+        event: ServerEvent = await loop.run_in_executor(None, app_event_queue.get)
         if event is None:
             break
+
         if event == WAKEWORD_EVENT:
+            # Stop any playing audio and clear queue
+            _output_stream.abort()
+            while not out_audio_q.empty():
+                out_audio_q.empty()
+            # Stop WakeWord Loop
             wake_word_run_event.clear()
             try:
-                # When wakeword is detected, connect to WebSocket and stream
+                # Connect to server
                 async with websockets.connect(server_url, **WS_CONFIG) as websocket:
                     try:
                         logger.info("✅ WebSocket connection established.")
+                        stream_audio.set()
                         async with asyncio.TaskGroup() as tg:
                             tg.create_task(
-                                handle_server_messages(websocket, stt_active)
+                                handle_server_msg_task(websocket, server_event_q)
                             )
                             tg.create_task(
-                                stream_audio(websocket, audio_queue, stt_active)
+                                handle_server_events_task(
+                                    server_event_q, out_audio_q, stream_audio
+                                )
+                            )
+                            tg.create_task(
+                                stream_audio_task(websocket, in_audio_q, stream_audio)
                             )
                     except* Exception as eg:
                         for exc in eg.exceptions:
@@ -366,19 +458,20 @@ async def listen_for_wakeword(
 
             except ConnectionRefusedError:
                 logger.warning("Server is offline. Could not connect.")
-                play_sound(AUDIO_CLIPS["error"])
+                await out_audio_q.put(AUDIO_CLIPS["error"])
                 await asyncio.sleep(RECONNECT_DELAY_SECONDS)
             except Exception:
                 logger.exception("An error occurred during WebSocket communication.")
-                play_sound(AUDIO_CLIPS["error"])
+                await out_audio_q.put(AUDIO_CLIPS["error"])
             finally:
-                while not audio_queue.empty():
-                    audio_queue.get_nowait()
+                while not in_audio_q.empty():
+                    in_audio_q.get_nowait()
+                logger.info("Ready to listen for wakeword")
                 wake_word_run_event.set()
 
 
 async def run_client(
-    audio_queue: mp.Queue, event_queue: mp.Queue, shutdown_event, wake_word_run_event
+    in_audio_q: mp.Queue, app_event_queue: mp.Queue, shutdown_event, wake_word_run_event
 ) -> None:
     """Main client function with a persistent reconnection loop."""
 
@@ -387,7 +480,7 @@ async def run_client(
         if status:
             logger.warning(status)
         try:
-            audio_queue.put_nowait(bytes(indata))
+            in_audio_q.put_nowait(bytes(indata))
         except queue.Full:
             logger.warning("Queue is full. Not taking items off fast enough")
 
@@ -403,9 +496,30 @@ async def run_client(
                     AUDIO_CONFIG["sample_rate"] * (AUDIO_CONFIG["chunk_ms"] / 1000)
                 ),
             ):
-                await listen_for_wakeword(
-                    audio_queue, event_queue, shutdown_event, wake_word_run_event
-                )
+                try:
+                    out_audio_q = asyncio.Queue()
+                    async with asyncio.TaskGroup() as tg:
+                        tg.create_task(
+                            handle_app_events(
+                                in_audio_q=in_audio_q,
+                                out_audio_q=out_audio_q,
+                                app_event_queue=app_event_queue,
+                                shutdown_event=shutdown_event,
+                                wake_word_run_event=wake_word_run_event,
+                            )
+                        )
+                        tg.create_task(play_sound_task(out_audio_q=out_audio_q))
+                except* Exception as eg:
+                    for exc in eg.exceptions:
+                        if not isinstance(
+                            exc,
+                            (
+                                ConnectionClosed,
+                                asyncio.CancelledError,
+                                TimeoutError,
+                            ),
+                        ):
+                            logger.error(f"Unhandled exception in task group: {exc!r}")
 
         except sd.PortAudioError as e:
             logger.critical(
@@ -443,8 +557,8 @@ def main() -> None:
         openwakeword.utils.download_models(model_names=[WAKEWORD_MODEL])
 
         # Create Mulitprocessing Queue
-        audio_queue = mp.Queue()
-        event_queue = mp.Queue()
+        in_audio_q = mp.Queue()
+        app_event_queue = mp.Queue()
         # Shutdown tasks and threads
         shutdown_event = mp.Event()
         # Signal whether we are streaming
@@ -454,8 +568,8 @@ def main() -> None:
         wakeword_process = mp.Process(
             target=wakeword_process_worker,
             args=(
-                audio_queue,
-                event_queue,
+                in_audio_q,
+                app_event_queue,
                 WAKEWORD_MODEL,
                 INFERENCE_FRAMEWORK,
                 shutdown_event,
@@ -468,7 +582,7 @@ def main() -> None:
         loop = uvloop.new_event_loop()
         asyncio.set_event_loop(loop)
         main_task = loop.create_task(
-            run_client(audio_queue, event_queue, shutdown_event, wake_word_run_event)
+            run_client(in_audio_q, app_event_queue, shutdown_event, wake_word_run_event)
         )
 
         try:
