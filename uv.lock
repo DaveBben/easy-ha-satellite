@@ -244,6 +244,7 @@ dependencies = [
     { name = "soundfile" },
     { name = "uvloop" },
     { name = "wavio" },
+    { name = "webrtc-noise-gain" },
     { name = "websockets" },
 ]
 
@@ -264,6 +265,7 @@ requires-dist = [
     { name = "soundfile", specifier = "~=0.13.1" },
     { name = "uvloop", specifier = "~=0.21.0" },
     { name = "wavio", specifier = "~=0.0.9" },
+    { name = "webrtc-noise-gain", specifier = ">=1.2.5" },
     { name = "websockets", specifier = "~=15.0.1" },
 ]
 
@@ -943,6 +945,20 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/d2/fa/e016582788aead27a0add5fe8b121bf0a370947c6779cf4e0fae35c3d3bb/wavio-0.0.9.tar.gz", hash = "sha256:5aa683a6b41b67d738b3d2d5883bca36ab2398c84ab7fa11940e0d9554cd1e85", size = 10491, upload-time = "2024-05-24T02:12:24.936Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/87/9a/50c7b7107b98330d295f82a38a8d33210fb33ca472cbdd18dce4ca2fdaec/wavio-0.0.9-py3-none-any.whl", hash = "sha256:c5966fd0f9ba4b6fddeb3d6622f9a6b62ca9e4c3daf5e6c3633a29a58dfbfed5", size = 9468, upload-time = "2024-05-24T02:12:23.448Z" },
+]
+
+[[package]]
+name = "webrtc-noise-gain"
+version = "1.2.5"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/77/b6/1262294378d0aaaaf9aea4a5a0cfcdae3540149088a79d46209e648ba705/webrtc_noise_gain-1.2.5.tar.gz", hash = "sha256:c00f452d4575050f46786fdddde7d6b2e30207b8df7fe134be59de1bec37d95d", size = 3073462, upload-time = "2024-07-08T16:21:31.299Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/1e/da/35d075e4fd641f0bc10e72e7363d0bdeca1c5c6ebf09f7d61153e4e15459/webrtc_noise_gain-1.2.5-cp311-cp311-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:410573a9d1717b3e47288d804f0efdfb3a571b697187f0768dd116d7fe88e5ec", size = 699809, upload-time = "2024-07-08T16:18:23.766Z" },
+    { url = "https://files.pythonhosted.org/packages/8a/aa/e4ed0e6069ea66fafced322aa885e1eb4d7c3d970379b4f044bbc2a6b053/webrtc_noise_gain-1.2.5-cp311-cp311-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:e94267bff486cf1603dff4386d47133cae87cd829eceebc00e2ee2885a4023d8", size = 739174, upload-time = "2024-07-08T16:18:29.547Z" },
+    { url = "https://files.pythonhosted.org/packages/1a/c9/56f8adc40bf870b563ce060b4ffce9c9746224be8662c60890d02db16a3d/webrtc_noise_gain-1.2.5-cp312-cp312-linux_armv6l.whl", hash = "sha256:56bfa2c7cb4ae235c3f859a5e319aaac06073e4b5ab7ccabebf8cd92a858d657", size = 623793, upload-time = "2024-07-08T16:10:39.723Z" },
+    { url = "https://files.pythonhosted.org/packages/d8/95/0d4e0feba882b2de1e0127043cb0c6e855cc1cc5d1d5e9241fae82752670/webrtc_noise_gain-1.2.5-cp312-cp312-linux_armv7l.whl", hash = "sha256:2b80449874e59b714939d2b1757d54c36c6fab15ecd48bbf4a5955e5329e1152", size = 593664, upload-time = "2024-07-08T16:10:42.481Z" },
+    { url = "https://files.pythonhosted.org/packages/5d/c9/9ee8ddcc20a82d8788fff5e46d3542ac9ff072893a2baaabf177d81b28df/webrtc_noise_gain-1.2.5-cp312-cp312-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:3c67447ce894038cddd19d8a655a15aff97bf6cda222bfc2be3473e79edfd9be", size = 699407, upload-time = "2024-07-08T16:18:22.57Z" },
+    { url = "https://files.pythonhosted.org/packages/07/86/fa3d0e2d596916d1603015560a52eb9eef50ee2ca4de62d28bd82187fcbe/webrtc_noise_gain-1.2.5-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:b92588f86aea50a462056db9df5dc17f07ea51a5cd65b051466b0ec4e9d14172", size = 739508, upload-time = "2024-07-08T16:18:25.675Z" },
 ]
 
 [[package]]
