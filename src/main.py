@@ -17,10 +17,11 @@ from enum import Enum
 from multiprocessing.synchronize import Event
 from pathlib import Path
 from typing import Any, Optional
+from urllib.parse import urljoin
 
+import aiohttp
 import numpy as np
 import openwakeword
-import requests
 import sounddevice as sd
 import soundfile as sf
 import uvloop
@@ -30,8 +31,10 @@ from websockets.exceptions import ConnectionClosed
 
 # Environment Variables
 HASS_TOKEN = os.environ.get("HASS_TOKEN")
-BASE_URL = os.environ.get("BASE_URL")
-SECURE_WEBSOCKET = os.environ.get("SECURE_WEBSOCKET", "true")
+HASS_HOST = os.environ.get("HASS_HOST")
+HASS_PORT = os.environ.get("HASS_PORT")
+
+SECURE_WEBSOCKET = os.environ.get("SECURE_WEBSOCKET", "true").lower() == "true"
 INPUT_DEVICE_NAME = os.environ.get("INPUT_AUDIO_DEVICE", None)
 OUTPUT_DEVICE_NAME = os.environ.get("OUTPUT_AUDIO_DEVICE", None)
 WAKEWORD_MODEL = os.environ.get("WAKEWORD_MODEL_NAME", "hey_jarvis")
@@ -58,7 +61,13 @@ AUDIO_CLIPS = {
 }
 
 # Server
-WS_SERVER_URL = f"{BASE_URL}/api/websocket"
+if not SECURE_WEBSOCKET:
+    BASE_URL = f"http://{HASS_HOST}:{HASS_PORT}"
+    WS_SERVER_URL = f"ws://{HASS_HOST}:{HASS_PORT}/api/websocket"
+else:
+    BASE_URL = f"https://{HASS_HOST}:{HASS_PORT}"
+    WS_SERVER_URL = f"wss://{HASS_HOST}:{HASS_PORT}/api/websocket"
+
 RECONNECT_DELAY_SECONDS = 5  # Time to wait before trying to reconnect
 WS_CONFIG = {"ping_interval": 20, "ping_timeout": 20}
 PIPELINE_ID = 1
@@ -72,7 +81,6 @@ WAKEWORD_EVENT = "WAKEWORD_DETECTED"
 # Output Audio
 OUTPUT_SR = 48_000
 OUTPUT_CH = 2
-_play_lock = threading.Lock()
 _output_stream = sd.OutputStream(
     samplerate=OUTPUT_SR,
     channels=OUTPUT_CH,
@@ -107,11 +115,10 @@ class ServerEvent:
 
 def wakeword_process_worker(
     in_audio_q: mp.Queue,
-    app_event_q: mp.Queue,
     model_name: str,
     inference_framework: str,
     shutdown_event: Event,
-    wake_word_run_event: Event,
+    wake_event: Event,
 ):
     try:
         oww_model = Model(
@@ -121,29 +128,31 @@ def wakeword_process_worker(
         logging.critical("Failed to load model in subprocess.", exc_info=True)
         return
     logging.info(f"Listening for {model_name}...")
-    while not shutdown_event.is_set():
-        try:
-            wake_word_run_event.wait()
-            while wake_word_run_event.is_set():
-                chunk = in_audio_q.get(timeout=AUDIO_CONFIG["chunk_ms"] / 1000)
-                if chunk is None:  # Sentinel value to stop the process
-                    break
-                # Wakeword Prediction
-                prediction = oww_model.predict(np.frombuffer(chunk, dtype=np.int16))
-                if prediction[model_name] > WAKE_WORD_THRESHOLD:
-                    logger.info(
-                        f"Wakeword detected! (Score: {prediction[model_name]:.2f})"
-                    )
-                    app_event_q.put(WAKEWORD_EVENT)
-                    oww_model.reset()
+    try:
+        while not shutdown_event.is_set():
+            try:
+                while not wake_event.is_set():
+                    chunk = in_audio_q.get(timeout=AUDIO_CONFIG['chunk_ms'] / 1000)
+                    if chunk is None:
+                        break
+                    # Wakeword Prediction
+                    prediction = oww_model.predict(np.frombuffer(chunk, dtype=np.int16))
+                    if prediction[model_name] > WAKE_WORD_THRESHOLD:
+                        logger.info(
+                            f"Wakeword detected! (Score: {prediction[model_name]:.2f})"
+                        )
+                        wake_event.set()
+                        oww_model.reset()
 
-        except queue.Empty:
-            # This is expected when no audio is coming in, just continue
-            continue
-        except KeyboardInterrupt:
-            break
-        except Exception:
-            logger.error("Error in Keyword detection process", exc_info=True)
+            except queue.Empty:
+                # This is expected when no audio is coming in, just continue
+                continue
+            except KeyboardInterrupt:
+                break
+            except Exception:
+                logger.error("Error in Keyword detection process", exc_info=True)
+    except KeyboardInterrupt:
+        pass
 
 
 def _to_output_format(data: np.ndarray, sr: int) -> np.ndarray:
@@ -161,37 +170,61 @@ def _to_output_format(data: np.ndarray, sr: int) -> np.ndarray:
     return data.astype("int16", copy=False)
 
 
-async def play_sound_task(out_audio_q: asyncio.Queue):
-    loop = asyncio.get_running_loop()
-    logger.info("Streaming Out task started")
+def play_sound_thread(out_audio_q: queue.Queue, shutdown_event: Event, abort_playback: Event):
+    chunk_frames = int(OUTPUT_SR * 0.02)
     try:
-        while True:
-            audio, sr = await out_audio_q.get()
-            pcm = _to_output_format(audio, sr)
-            if not _output_stream.active:
-                _output_stream.start()
-            try:
-                await loop.run_in_executor(None, _output_stream.write, pcm)
-            except sd.PortAudioError as e:
-                # Expected because we abort
-                logger.debug(e)
-    except asyncio.CancelledError:
-        logger.info("play sound task stopped")
+        with sd.OutputStream(
+            samplerate=OUTPUT_SR,
+            channels=OUTPUT_CH,
+            device=OUTPUT_DEVICE_NAME,
+            dtype="int16",
+            latency=0.01,
+        ) as stream:
+            while not shutdown_event.is_set():
+                try:
+                    audio, sr = out_audio_q.get(timeout=0.5)
+                except queue.Empty:
+                    continue
+
+                # In case flag got set while we were waiting
+                if abort_playback.is_set():
+                    try:
+                        stream.abort()
+                    except sd.PortAudioError: 
+                        pass
+                    abort_playback.clear()
+                stream.start()
+
+                pcm = _to_output_format(audio, sr)
+                # Write in small slices so we can abort if needed
+                for start in range(0, len(pcm), chunk_frames):
+                    if abort_playback.is_set() or shutdown_event.is_set():
+                        try:
+                            stream.abort()
+                        except sd.PortAudioError: 
+                            pass
+                        while not out_audio_q.empty():
+                            out_audio_q.get_nowait()
+                        abort_playback.clear()
+                        break
+
+                    slice_ = pcm[start:start + chunk_frames]
+                    stream.write(slice_)
     except Exception:
-        logger.exception("Play sound task encountered a fatal error.")
-        raise
+        logger.exception("Play sound thread crashed")
 
 
 async def handle_server_events_task(
-    event_q: asyncio.Queue, out_audio_q: asyncio.Queue, stream_audio: asyncio.Event
+    event_q: asyncio.Queue, out_audio_q: queue.Queue, stream_audio: asyncio.Event
 ):
+    loop = asyncio.get_running_loop()
     logger.info("Handle Events Task Started")
     try:
         while True:
             event: ServerEvent = await event_q.get()
             match event.type:
                 case ServerEventType.STT_STARTED:
-                    await out_audio_q.put(AUDIO_CLIPS["listen_start"])
+                    loop.run_in_executor(None, out_audio_q.put, AUDIO_CLIPS["listen_start"])
                     # Set flag that audio stream is ready
                     stream_audio.set()
                 case ServerEventType.STT_COMPLETED:
@@ -199,18 +232,18 @@ async def handle_server_events_task(
                     stream_audio.clear()
                     logger.info(f"Phrase: {event.data}")
                 case ServerEventType.ACTION_SUCCESS:
-                    await out_audio_q.put(AUDIO_CLIPS["task_complete"])
+                    loop.run_in_executor(None, out_audio_q.put, AUDIO_CLIPS["task_complete"])
                 case ServerEventType.ACTION_FAILED:
-                    await out_audio_q.put(AUDIO_CLIPS["error"])
+                    loop.run_in_executor(None, out_audio_q.put, AUDIO_CLIPS["error"])
                     logger.warning(event.data)
                     stream_audio.clear()
                     # Stop Processing Events
                     break
                 case ServerEventType.TTS_COMPLETED:
                     media_url = event.data
-                    audio_mp3 = download_tts_bytes(media_url)
+                    audio_mp3 = await download_tts_bytes(media_url)
                     pcm, sr = sf.read(io.BytesIO(audio_mp3), dtype="int16")
-                    await out_audio_q.put((pcm, sr))
+                    loop.run_in_executor(None, out_audio_q.put, (pcm, sr))
                     # Stop Processing Events
                     break
                 case _:
@@ -222,18 +255,32 @@ async def handle_server_events_task(
         raise
 
 
-def download_tts_bytes(path: str, chunk_size: int = 8192) -> bytes:
-    url = f"http://{BASE_URL}{path}"
-    logger.debug(f"Grabbing audio from: {url}")
-    headers = {"Authorization": f"Bearer {HASS_TOKEN}"}
+async def download_tts_bytes(
+    path: str,
+    chunk_size: int = 8192,
+) -> bytes:
+    url = urljoin(BASE_URL.rstrip("/") + "/", path.lstrip("/"))
+    timeout = aiohttp.ClientTimeout(total=15, sock_read=10)
     buf = bytearray()
-    with requests.get(url, headers=headers, stream=True, timeout=15) as r:
-        r.raise_for_status()
-        for chunk in r.iter_content(chunk_size=chunk_size):
-            if not chunk:
-                continue
-            buf.extend(chunk)
-    return bytes(buf)
+
+    async with aiohttp.ClientSession(
+        headers={"Authorization": f"Bearer {HASS_TOKEN}"},
+        timeout=timeout,
+    ) as session:
+        try:
+            async with session.get(url) as resp:
+                resp.raise_for_status()
+                async for chunk in resp.content.iter_chunked(chunk_size):
+                    if not chunk:
+                        continue
+                    buf.extend(chunk)
+            return bytes(buf)
+
+        except asyncio.CancelledError:
+            raise
+        except aiohttp.ClientError as e:
+            logger.error(f"TTS download failed: {e}")
+            raise
 
 
 async def handle_server_msg_task(
@@ -389,44 +436,34 @@ async def stream_audio_task(
         logger.info("🛑 Microphone stream is now stopped")
 
 
+def clear_queue(q: mp.Queue):
+    while not q.empty():
+        q.get_nowait()
+
+
 async def handle_app_events(
     in_audio_q: mp.Queue,
-    out_audio_q: asyncio.Queue,
-    app_event_queue: mp.Queue,
+    out_audio_q: queue.Queue,
     shutdown_event: Event,
-    wake_word_run_event: Event,
+    wake_event: Event,
+    abort_playback: Event
 ) -> None:
     """Waits for a wakeword detection event and then manages the server interaction."""
-    loop = asyncio.get_running_loop()
-
-    # Start Wakeword Loop
-    wake_word_run_event.set()
 
     stream_audio = asyncio.Event()
     server_event_q = asyncio.Queue()
 
     # Create Server URL
-    server_url = f"wss://{WS_SERVER_URL}"
-    if str(SECURE_WEBSOCKET.lower()) == "false":
-        server_url = f"ws://{WS_SERVER_URL}"
-    logger.info(f"Using HomeAssistant URl {server_url}")
+    logger.info(f"Using HomeAssistant URl {WS_SERVER_URL}")
 
     # Main Loop
     while not shutdown_event.is_set():
-        event: ServerEvent = await loop.run_in_executor(None, app_event_queue.get)
-        if event is None:
-            break
-
-        if event == WAKEWORD_EVENT:
+        if wake_event.is_set():
             # Stop any playing audio and clear queue
-            _output_stream.abort()
-            while not out_audio_q.empty():
-                out_audio_q.empty()
-            # Stop WakeWord Loop
-            wake_word_run_event.clear()
+            abort_playback.set()
             try:
                 # Connect to server
-                async with websockets.connect(server_url, **WS_CONFIG) as websocket:
+                async with websockets.connect(WS_SERVER_URL, **WS_CONFIG) as websocket:
                     try:
                         logger.info("✅ WebSocket connection established.")
                         stream_audio.set()
@@ -458,21 +495,19 @@ async def handle_app_events(
 
             except ConnectionRefusedError:
                 logger.warning("Server is offline. Could not connect.")
-                await out_audio_q.put(AUDIO_CLIPS["error"])
+                asyncio.get_event_loop().run_in_executor(None, out_audio_q.put, AUDIO_CLIPS["error"])
                 await asyncio.sleep(RECONNECT_DELAY_SECONDS)
             except Exception:
                 logger.exception("An error occurred during WebSocket communication.")
-                await out_audio_q.put(AUDIO_CLIPS["error"])
+                asyncio.get_event_loop().run_in_executor(None, out_audio_q.put, AUDIO_CLIPS["error"])
+                break
             finally:
-                while not in_audio_q.empty():
-                    in_audio_q.get_nowait()
+                clear_queue(in_audio_q)
+                wake_event.clear()
                 logger.info("Ready to listen for wakeword")
-                wake_word_run_event.set()
 
 
-async def run_client(
-    in_audio_q: mp.Queue, app_event_queue: mp.Queue, shutdown_event, wake_word_run_event
-) -> None:
+async def run_client(in_audio_q: mp.Queue,out_audio_q: queue.Queue, shutdown_event: Event, wake_event: Event, abort_playback_event: Event) -> None:
     """Main client function with a persistent reconnection loop."""
 
     def audio_callback(indata, frames, time, status):
@@ -497,18 +532,16 @@ async def run_client(
                 ),
             ):
                 try:
-                    out_audio_q = asyncio.Queue()
                     async with asyncio.TaskGroup() as tg:
                         tg.create_task(
                             handle_app_events(
                                 in_audio_q=in_audio_q,
                                 out_audio_q=out_audio_q,
-                                app_event_queue=app_event_queue,
                                 shutdown_event=shutdown_event,
-                                wake_word_run_event=wake_word_run_event,
+                                wake_event=wake_event,
+                                abort_playback=abort_playback_event
                             )
                         )
-                        tg.create_task(play_sound_task(out_audio_q=out_audio_q))
                 except* Exception as eg:
                     for exc in eg.exceptions:
                         if not isinstance(
@@ -535,8 +568,8 @@ async def run_client(
 def main() -> None:
     if not HASS_TOKEN:
         raise ValueError("Home Assistant Long Lived token is not set!")
-    if not BASE_URL:
-        raise ValueError("Home Assistant Base URL is not set!")
+    if not HASS_PORT or not HASS_HOST:
+        raise ValueError("Home Assistant post and host needs to be set!")
     try:
         print("\n" + "-" * 50)
         print("Available audio input devices:")
@@ -558,32 +591,39 @@ def main() -> None:
 
         # Create Mulitprocessing Queue
         in_audio_q = mp.Queue()
-        app_event_queue = mp.Queue()
+        out_audio_q = queue.Queue()
         # Shutdown tasks and threads
         shutdown_event = mp.Event()
         # Signal whether we are streaming
-        wake_word_run_event = mp.Event()
+        wake_event = mp.Event()
+        # Signal to abort audio playback
+        abort_playback = mp.Event()
 
         # Start Dedicated Wakeword Process
         wakeword_process = mp.Process(
             target=wakeword_process_worker,
             args=(
                 in_audio_q,
-                app_event_queue,
                 WAKEWORD_MODEL,
                 INFERENCE_FRAMEWORK,
                 shutdown_event,
-                wake_word_run_event,
+                wake_event,
             ),
             daemon=True,  # auto-terminate with the main process
         )
         wakeword_process.start()
 
+        # Play sound
+        player_thr = threading.Thread(
+            target=play_sound_thread,
+            args=(out_audio_q, shutdown_event, abort_playback),   # pass your asyncio.Queue and the event loop
+            daemon=True,
+        )
+        player_thr.start()
+
         loop = uvloop.new_event_loop()
         asyncio.set_event_loop(loop)
-        main_task = loop.create_task(
-            run_client(in_audio_q, app_event_queue, shutdown_event, wake_word_run_event)
-        )
+        main_task = loop.create_task(run_client(in_audio_q, out_audio_q, shutdown_event, wake_event, abort_playback))
 
         try:
             loop.run_until_complete(main_task)
@@ -593,32 +633,17 @@ def main() -> None:
             logger.info("Shutting down...")
 
             shutdown_event.set()
-            # Gracefully cancel all running asyncio tasks
-            for task in asyncio.all_tasks(loop=loop):
-                task.cancel()
-
-            # Wait for tasks to finish cancelling
-            try:
-                # gather cancelled tasks to allow them to finish
-                loop.run_until_complete(
-                    asyncio.gather(
-                        *asyncio.all_tasks(loop=loop), return_exceptions=True
-                    )
-                )
-            except asyncio.CancelledError:
-                pass  # This is expected
-
-            # Now close the loop
+            main_task.cancel()
             loop.close()
 
             # join the background process
             wakeword_process.join(timeout=2)
+            player_thr.join(timeout=2)
             if wakeword_process.is_alive():
                 wakeword_process.terminate()
 
     except Exception:
         logger.critical("A fatal error occurred in main.", exc_info=True)
-        raise
 
 
 if __name__ == "__main__":

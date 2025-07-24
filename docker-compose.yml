@@ -10,11 +10,12 @@ services:
     volumes:
       - /home/dave/.asoundrc:/etc/asound.conf
     environment:
-      BASE_URL: ${BASE_URL}
+      HASS_HOST: ${HASS_HOST}
+      HASS_PORT: ${HASS_PORT}
       HASS_TOKEN: ${HASS_TOKEN}
       SECURE_WEBSOCKET: "false"
       WAKEWORD_MODEL_NAME: hey_jarvis
-      WW_THRESHOLD: 0.5
+      WW_THRESHOLD: 0.7
       INFERENCE_FRAMEWORK: onnx
       PUID: ${UID}
       PGID: ${GID}
