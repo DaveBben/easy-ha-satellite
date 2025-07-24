@@ -81,15 +81,6 @@ WAKEWORD_EVENT = "WAKEWORD_DETECTED"
 # Output Audio
 OUTPUT_SR = 48_000
 OUTPUT_CH = 2
-_output_stream = sd.OutputStream(
-    samplerate=OUTPUT_SR,
-    channels=OUTPUT_CH,
-    device=OUTPUT_DEVICE_NAME,
-    dtype="int16",
-    latency=0.01,
-)
-_output_stream.start()
-
 
 # --- Logging Setup ---
 logging.basicConfig(

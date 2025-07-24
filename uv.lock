@@ -230,6 +230,47 @@ wheels = [
 ]
 
 [[package]]
+name = "easy-ha-satellite"
+version = "0.1.0"
+source = { virtual = "." }
+dependencies = [
+    { name = "aiohttp" },
+    { name = "numpy" },
+    { name = "openwakeword" },
+    { name = "pyaudio" },
+    { name = "pydub" },
+    { name = "simpleaudio" },
+    { name = "sounddevice" },
+    { name = "soundfile" },
+    { name = "uvloop" },
+    { name = "wavio" },
+    { name = "websockets" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "ruff" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "aiohttp", specifier = "~=3.12.14" },
+    { name = "numpy", specifier = "~=1.26.4" },
+    { name = "openwakeword", specifier = "~=0.6.0" },
+    { name = "pyaudio", specifier = "~=0.2.14" },
+    { name = "pydub", specifier = "~=0.25.1" },
+    { name = "simpleaudio", specifier = "~=1.0.4" },
+    { name = "sounddevice", specifier = "~=0.5.2" },
+    { name = "soundfile", specifier = "~=0.13.1" },
+    { name = "uvloop", specifier = "~=0.21.0" },
+    { name = "wavio", specifier = "~=0.0.9" },
+    { name = "websockets", specifier = "~=15.0.1" },
+]
+
+[package.metadata.requires-dev]
+dev = [{ name = "ruff", specifier = "==0.11.11" }]
+
+[[package]]
 name = "flatbuffers"
 version = "25.2.10"
 source = { registry = "https://pypi.org/simple" }
@@ -891,47 +932,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/47/57/66f061ee118f413cd22a656de622925097170b9380b30091b78ea0c6ea75/uvloop-0.21.0-cp313-cp313-musllinux_1_2_aarch64.whl", hash = "sha256:bd53ecc9a0f3d87ab847503c2e1552b690362e005ab54e8a48ba97da3924c0dc", size = 4454428, upload-time = "2024-10-14T23:38:08.416Z" },
     { url = "https://files.pythonhosted.org/packages/63/9a/0962b05b308494e3202d3f794a6e85abe471fe3cafdbcf95c2e8c713aabd/uvloop-0.21.0-cp313-cp313-musllinux_1_2_x86_64.whl", hash = "sha256:a5c39f217ab3c663dc699c04cbd50c13813e31d917642d459fdcec07555cc553", size = 4660018, upload-time = "2024-10-14T23:38:10.888Z" },
 ]
-
-[[package]]
-name = "wake-word-test"
-version = "0.1.0"
-source = { virtual = "." }
-dependencies = [
-    { name = "aiohttp" },
-    { name = "numpy" },
-    { name = "openwakeword" },
-    { name = "pyaudio" },
-    { name = "pydub" },
-    { name = "simpleaudio" },
-    { name = "sounddevice" },
-    { name = "soundfile" },
-    { name = "uvloop" },
-    { name = "wavio" },
-    { name = "websockets" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "ruff" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "aiohttp", specifier = "~=3.12.14" },
-    { name = "numpy", specifier = "~=1.26.4" },
-    { name = "openwakeword", specifier = "~=0.6.0" },
-    { name = "pyaudio", specifier = "~=0.2.14" },
-    { name = "pydub", specifier = "~=0.25.1" },
-    { name = "simpleaudio", specifier = "~=1.0.4" },
-    { name = "sounddevice", specifier = "~=0.5.2" },
-    { name = "soundfile", specifier = "~=0.13.1" },
-    { name = "uvloop", specifier = "~=0.21.0" },
-    { name = "wavio", specifier = "~=0.0.9" },
-    { name = "websockets", specifier = "~=15.0.1" },
-]
-
-[package.metadata.requires-dev]
-dev = [{ name = "ruff", specifier = "==0.11.11" }]
 
 [[package]]
 name = "wavio"
