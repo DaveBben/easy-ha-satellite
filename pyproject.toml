@@ -1,7 +1,7 @@
 [project]
-name = "wake-word-test"
+name = "easy-ha-satellite"
 version = "0.1.0"
-description = "Open source voice assistant for your home"
+description = "A plug-and-play satellite for Home Assistant using Docker"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
