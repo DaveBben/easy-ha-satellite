@@ -27,7 +27,9 @@ import soundfile as sf
 import uvloop
 import websockets
 from openwakeword.model import Model
+from webrtc_noise_gain import AudioProcessor
 from websockets.exceptions import ConnectionClosed
+import time
 
 # Environment Variables
 HASS_TOKEN = os.environ.get("HASS_TOKEN")
@@ -40,6 +42,8 @@ OUTPUT_DEVICE_NAME = os.environ.get("OUTPUT_AUDIO_DEVICE", None)
 WAKEWORD_MODEL = os.environ.get("WAKEWORD_MODEL_NAME", "hey_jarvis")
 WAKE_WORD_THRESHOLD = float(os.environ.get("WW_THRESHOLD", "0.5"))
 INFERENCE_FRAMEWORK = os.environ.get("INFERENCE_FRAMEWORK", "onnx")
+NOISE_SUPPRESSION_LEVEL = int(os.environ.get("NOISE_SUPPRESSION_LEVEL", "3"))
+AUTO_GAIN_DBFS = int(os.environ.get('AUTO_GAIN_DBFS', '15'))
 
 # Audio Config
 AUDIO_CONFIG = {
@@ -122,18 +126,18 @@ def wakeword_process_worker(
     try:
         while not shutdown_event.is_set():
             try:
-                while not wake_event.is_set():
-                    chunk = in_audio_q.get(timeout=AUDIO_CONFIG['chunk_ms'] / 1000)
-                    if chunk is None:
-                        break
-                    # Wakeword Prediction
-                    prediction = oww_model.predict(np.frombuffer(chunk, dtype=np.int16))
-                    if prediction[model_name] > WAKE_WORD_THRESHOLD:
-                        logger.info(
-                            f"Wakeword detected! (Score: {prediction[model_name]:.2f})"
-                        )
-                        wake_event.set()
-                        oww_model.reset()
+                chunk = in_audio_q.get()
+                if chunk is None:
+                    break
+                # Wakeword Prediction
+                prediction = oww_model.predict(np.frombuffer(chunk, dtype=np.int16))
+                if prediction[model_name] > WAKE_WORD_THRESHOLD:
+                    logger.info(
+                        f"Wakeword detected! (Score: {prediction[model_name]:.2f})"
+                    )
+                    wake_event.set()
+                    oww_model.reset()
+                    time.sleep(2)
 
             except queue.Empty:
                 # This is expected when no audio is coming in, just continue
@@ -173,7 +177,9 @@ def play_sound_thread(out_audio_q: queue.Queue, shutdown_event: Event, abort_pla
         ) as stream:
             while not shutdown_event.is_set():
                 try:
-                    audio, sr = out_audio_q.get(timeout=0.5)
+                    audio, sr = out_audio_q.get()
+                    if audio is None and sr is None:
+                        break
                 except queue.Empty:
                     continue
 
@@ -449,64 +455,66 @@ async def handle_app_events(
 
     # Main Loop
     while not shutdown_event.is_set():
-        if wake_event.is_set():
-            # Stop any playing audio and clear queue
-            abort_playback.set()
-            try:
-                # Connect to server
-                async with websockets.connect(WS_SERVER_URL, **WS_CONFIG) as websocket:
-                    try:
-                        logger.info("✅ WebSocket connection established.")
-                        stream_audio.set()
-                        async with asyncio.TaskGroup() as tg:
-                            tg.create_task(
-                                handle_server_msg_task(websocket, server_event_q)
+        wake_event.wait()
+        # Stop any playing audio and clear queue
+        abort_playback.set()
+        try:
+            # Connect to server
+            async with websockets.connect(WS_SERVER_URL, **WS_CONFIG) as websocket:
+                try:
+                    logger.info("✅ WebSocket connection established.")
+                    stream_audio.set()
+                    async with asyncio.TaskGroup() as tg:
+                        tg.create_task(
+                            handle_server_msg_task(websocket, server_event_q)
+                        )
+                        tg.create_task(
+                            handle_server_events_task(
+                                server_event_q, out_audio_q, stream_audio
                             )
-                            tg.create_task(
-                                handle_server_events_task(
-                                    server_event_q, out_audio_q, stream_audio
-                                )
+                        )
+                        tg.create_task(
+                            stream_audio_task(websocket, in_audio_q, stream_audio)
+                        )
+                except* Exception as eg:
+                    for exc in eg.exceptions:
+                        if not isinstance(
+                            exc,
+                            (
+                                ConnectionClosed,
+                                asyncio.CancelledError,
+                                TimeoutError,
+                            ),
+                        ):
+                            logger.error(
+                                f"Unhandled exception in task group: {exc!r}"
                             )
-                            tg.create_task(
-                                stream_audio_task(websocket, in_audio_q, stream_audio)
-                            )
-                    except* Exception as eg:
-                        for exc in eg.exceptions:
-                            if not isinstance(
-                                exc,
-                                (
-                                    ConnectionClosed,
-                                    asyncio.CancelledError,
-                                    TimeoutError,
-                                ),
-                            ):
-                                logger.error(
-                                    f"Unhandled exception in task group: {exc!r}"
-                                )
 
-            except ConnectionRefusedError:
-                logger.warning("Server is offline. Could not connect.")
-                asyncio.get_event_loop().run_in_executor(None, out_audio_q.put, AUDIO_CLIPS["error"])
-                await asyncio.sleep(RECONNECT_DELAY_SECONDS)
-            except Exception:
-                logger.exception("An error occurred during WebSocket communication.")
-                asyncio.get_event_loop().run_in_executor(None, out_audio_q.put, AUDIO_CLIPS["error"])
-                break
-            finally:
-                clear_queue(in_audio_q)
-                wake_event.clear()
-                logger.info("Ready to listen for wakeword")
+        except ConnectionRefusedError:
+            logger.warning("Server is offline. Could not connect.")
+            asyncio.get_event_loop().run_in_executor(None, out_audio_q.put, AUDIO_CLIPS["error"])
+            await asyncio.sleep(RECONNECT_DELAY_SECONDS)
+        except Exception:
+            logger.exception("An error occurred during WebSocket communication.")
+            asyncio.get_event_loop().run_in_executor(None, out_audio_q.put, AUDIO_CLIPS["error"])
+            break
+        finally:
+            clear_queue(in_audio_q)
+            wake_event.clear()
+            logger.info("Ready to listen for wakeword")
 
 
 async def run_client(in_audio_q: mp.Queue,out_audio_q: queue.Queue, shutdown_event: Event, wake_event: Event, abort_playback_event: Event) -> None:
     """Main client function with a persistent reconnection loop."""
+    audio_processor = AudioProcessor(AUTO_GAIN_DBFS, NOISE_SUPPRESSION_LEVEL)
 
     def audio_callback(indata, frames, time, status):
         """This is called from a separate thread for each audio block."""
         if status:
             logger.warning(status)
         try:
-            in_audio_q.put_nowait(bytes(indata))
+            process_chunk = audio_processor.Process10ms(bytes(indata))
+            in_audio_q.put_nowait(process_chunk.audio)
         except queue.Full:
             logger.warning("Queue is full. Not taking items off fast enough")
 
