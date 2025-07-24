@@ -917,7 +917,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "aiohttp", specifier = ">=3.12.14" },
+    { name = "aiohttp", specifier = "~=3.12.14" },
     { name = "numpy", specifier = "~=1.26.4" },
     { name = "openwakeword", specifier = "~=0.6.0" },
     { name = "pyaudio", specifier = "~=0.2.14" },
