@@ -32,11 +32,13 @@ def detector_process(
     shutdown: Event,
     resume: Event,
     wake_events: queue.Queue[WakeEvent],
+    bootstrap: Event,
 ):
     """Run forever"""
     capture = AudioCapture(mic_cfg, device, mic_lock=sem)
     detector = WakeWordDetector(wake_cfg)  # or pass in
     logger.info("Listening for WakeWord")
+    bootstrap.set()
     try:
         with capture:
             while not shutdown.is_set():

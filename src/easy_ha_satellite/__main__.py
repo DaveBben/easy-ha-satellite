@@ -108,6 +108,7 @@ async def main() -> None:
         mic_sem: Semaphore = ctx.Semaphore(1)
         resume = ctx.Event()
         shutdown = ctx.Event()
+        bootstrap = ctx.Event()
         wake_events: queue.Queue[WakeEvent] = ctx.Queue()
 
         # Spawn detector
@@ -121,6 +122,7 @@ async def main() -> None:
                 shutdown,
                 resume,
                 wake_events,
+                bootstrap,
             ),
             daemon=True,
         )
@@ -131,6 +133,12 @@ async def main() -> None:
                 AudioPlayback(out_audio_cfg, os.getenv("OUTPUT_AUDIO_DEVICE"))
             )
             hass = await stack.enter_async_context(HASSocketClient(hass_cfg, token))
+            try:
+                await asyncio.wait_for(asyncio.to_thread(bootstrap.wait), timeout=10)
+            except TimeoutError:
+                logger.error("Timed out waiting for wake word process")
+                raise
+
             await OnDeviceAlerts(speaker).play(Alert.CONNECTED)
 
             while True:

@@ -13,38 +13,33 @@ name = "easy-ha-satellite"
 dynamic = ["version"]
 description = "A plug-and-play satellite for Home Assistant using Docker"
 requires-python = ">=3.11,<3.12"
-authors = [{ name = "Dave Bennett", email = "you@example.com" }]
+authors = [{ name = "Dave Bennett"}]
 license = { text = "MIT" }
 urls = { "Source" = "https://github.com/davebben/easy-ha-satellite" }
 classifiers = [
-  "Programming Language :: Python :: 3.11",
-  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3.11"
 ]
 
 dependencies = [
-  "sounddevice~=0.5.2",
-  "openwakeword~=0.6.0",
-  "numpy~=1.26.4",
-  "websockets~=15.0.1",
-  "uvloop~=0.21.0",
-  "aiohttp~=3.12.14",
-  "webrtc-noise-gain>=1.2.5",
-  "soundfile~=0.13.1",
-  "pydantic>=2.11.7",
-  "pyaml>=25.7.0",
-  "pydub>=0.25.1",
-  "pyroomacoustics>=0.8.4",
+  "sounddevice>=0.5.2,<0.6",
+  "openwakeword>=0.6,<0.7",
+  "numpy>=1.26,<2", 
+  "websockets>=15,<16",
+  "uvloop>=0.21,<0.22",
+  "aiohttp>=3.12,<4",
+  "soundfile>=0.13,<1",
+  "pydantic>=2.11,<3",
+  "pyyaml>=6.0.2,<7",
+  "pydub>=0.25,<0.26",
+  "pyroomacoustics>=0.8.4,<0.9",
 ]
-
-[project.optional-dependencies]
-media = ["pydub~=0.25.1", "soundfile~=0.13.1"]
 
 [project.scripts]
 easy-ha-sat = "easy_ha_satellite.__main__:main"
 
 [dependency-groups]
 dev = [
-  "ruff==0.12.5",
+  "ruff>=0.12.5,<0.13",
   "pytest>=8",
   "nox>=2024.3",
 ]

@@ -3,8 +3,8 @@ from typing import Any
 import numpy as np
 import pyroomacoustics as pra
 import sounddevice as sd
-from scipy.signal import resample
 from pyroomacoustics.denoise.spectral_subtraction import SpectralSub
+from scipy.signal import resample
 
 
 def query_audio_devices():

@@ -1,7 +1,3 @@
-# WebSocket server binding details
-WEBSOCKET_HOST: 0.0.0.0 # Bind to all interfaces
-WEBSOCKET_PORT: 8765 # Port for the WebSocket server
-
 # WakeWord Detection
 wakeword:
   threshold: 0.6
