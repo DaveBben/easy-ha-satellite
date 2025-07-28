@@ -1,0 +1,18 @@
+# WebSocket server binding details
+WEBSOCKET_HOST: 0.0.0.0 # Bind to all interfaces
+WEBSOCKET_PORT: 8765 # Port for the WebSocket server
+
+# WakeWord Detection
+wakeword:
+  threshold: 0.6
+  cooldown_sec: 2.0
+  openWakeWord:
+    model: "hey_jarvis"
+    inference_framework: "onnx"
+
+
+# Home Assistant
+home_assistant:
+  host: 192.168.1.49
+  port: 8123
+  ssl: false
