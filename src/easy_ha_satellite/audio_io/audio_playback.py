@@ -51,19 +51,23 @@ class AudioPlayback:
                     song = song.set_frame_rate(self._cfg.sample_rate)
                 if song.channels != self._cfg.channels:
                     song = song.set_channels(self._cfg.channels)
-                
+
                 target_sample_width = np.dtype(self._cfg.dtype).itemsize
                 if song.sample_width != target_sample_width:
                     song = song.set_sample_width(target_sample_width)
-                
+
                 samples = np.array(song.get_array_of_samples())
-                final_audio_data = samples.reshape((-1, song.channels)) if song.channels > 1 else samples
+                final_audio_data = (
+                    samples.reshape((-1, song.channels)) if song.channels > 1 else samples
+                )
 
             elif isinstance(audio_data, np.ndarray):
                 logger.debug("Received NumPy array. Preparing audio...")
                 if source_sr is None:
-                    raise ValueError("source_sr must be provided when passing a NumPy array to play()")
-                
+                    raise ValueError(
+                        "source_sr must be provided when passing a NumPy array to play()"
+                    )
+
                 final_audio_data = prepare_audio(
                     audio_data=audio_data,
                     source_sr=source_sr,
@@ -73,7 +77,7 @@ class AudioPlayback:
                 )
             else:
                 raise TypeError(f"Unsupported audio_data type: {type(audio_data)}")
-        
+
         except Exception as e:
             logger.error(f"Failed to prepare audio for playback: {e}")
             return
@@ -89,22 +93,22 @@ class AudioPlayback:
         try:
             audio_bytes = audio_data.tobytes()
             chunk_size_bytes = self._cfg.bytes_per_chunk
-            
+
             # 1. Prime the buffer with the first chunk.
             first_chunk = audio_bytes[:chunk_size_bytes]
             if not first_chunk:
                 logger.warning("Audio data is empty, nothing to play.")
                 return
-            
+
             self._clear_buffer()
             await self.put_chunk(first_chunk)
-            
+
             # 2. Now that the buffer is primed, start the stream.
             await self.start()
-            
+
             # 3. Feed the rest of the audio data.
             for i in range(chunk_size_bytes, len(audio_bytes), chunk_size_bytes):
-                await self.put_chunk(audio_bytes[i:i + chunk_size_bytes])
+                await self.put_chunk(audio_bytes[i : i + chunk_size_bytes])
 
             # 4. Signal the end of the stream.
             await self.put_chunk(None)

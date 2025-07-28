@@ -11,7 +11,6 @@ from .schemas import HomeAssistantConfig
 logger = get_logger("http_client")
 
 
-
 class HASSHttpClient:
     def __init__(self, config: HomeAssistantConfig, api_token: str):
         self._cfg = config

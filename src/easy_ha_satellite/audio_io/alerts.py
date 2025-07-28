@@ -37,4 +37,3 @@ class OnDeviceAlerts:
                 alert_bytes = f.read()
             self._cache[alert] = alert_bytes
             return alert_bytes
-
