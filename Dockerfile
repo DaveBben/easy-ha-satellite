@@ -38,7 +38,11 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # Application
 FROM --platform=$TARGETPLATFORM python:3.11-slim AS final
 
-LABEL org.opencontainers.image.title="wakeword-detector"
+ARG APP_VERSION=0.0.0-dev
+ENV HATCH_BUILD_VERSION=${APP_VERSION}
+
+LABEL org.opencontainers.image.version=${APP_VERSION}
+LABEL org.opencontainers.image.title="easy-ha-satellite"
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"] 
 
