@@ -12,7 +12,6 @@ fallback-version = "0.0.0"
 name = "easy-ha-satellite"
 dynamic = ["version"]
 description = "A plug-and-play satellite for Home Assistant using Docker"
-readme = "README.md"
 requires-python = ">=3.11,<3.12"
 authors = [{ name = "Dave Bennett", email = "you@example.com" }]
 license = { text = "MIT" }
