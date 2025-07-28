@@ -32,6 +32,7 @@ dependencies = [
   "pydantic>=2.11.7",
   "pyaml>=25.7.0",
   "pydub>=0.25.1",
+  "pyroomacoustics>=0.8.4",
 ]
 
 [project.optional-dependencies]
