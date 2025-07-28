@@ -1,10 +1,12 @@
 [build-system]
-requires = ["hatchling>=1.26", "hatch-vcs>=0.4"]
+requires = ["hatchling", "uv-dynamic-versioning"]
 build-backend = "hatchling.build"
 
 [tool.hatch.version]
-source = "vcs"
-tag-pattern = "v*"
+source = "uv-dynamic-versioning"
+
+[tool.uv-dynamic-versioning]
+fallback-version = "0.0.0"
 
 [project]
 name = "easy-ha-satellite"
