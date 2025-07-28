@@ -1,19 +1,16 @@
 from __future__ import annotations
 
-import functools
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import (
     BaseModel,
+    BeforeValidator,
     ConfigDict,
     Field,
     SecretStr,
-    ValidationError,
     computed_field,
     field_serializer,
 )
-
-from easy_ha_satellite.config import ConfigError, load_config_dict
 
 Port = Annotated[int, Field(ge=1, le=65_535)]
 Hostname = Annotated[str, Field(min_length=1, pattern=r"^[A-Za-z0-9.-]+$")]
@@ -21,12 +18,18 @@ Scheme = Literal["http", "https"]
 WSScheme = Literal["ws", "wss"]
 
 
+def to_bool(value: Any) -> Any:
+    if isinstance(value, str):
+        return value.lower() == "true"
+    return value
+
+
 class HomeAssistantConfig(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     host: Hostname
     port: Port
-    ssl: bool = False
+    ssl: Annotated[bool, BeforeValidator(to_bool)] = False
     request_timeout_s: float = Field(10.0, gt=0)
 
     @computed_field  # type: ignore[misc]
@@ -40,20 +43,6 @@ class HomeAssistantConfig(BaseModel):
     def ws_api_url(self) -> str:
         wscheme: WSScheme = "wss" if self.ssl else "ws"
         return f"{wscheme}://{self.host}:{self.port}/api/websocket"
-
-
-@functools.lru_cache(maxsize=1)
-def load_hass_config() -> HomeAssistantConfig:
-    """
-    Build the Pydantic config model from the dict.
-    Raise ConfigError if validation fails.
-    """
-    try:
-        data = load_config_dict().get("home_assistant", {})
-        return HomeAssistantConfig.model_validate(data)
-    except ValidationError as e:
-        short = e.errors(include_url=False)[0]["msg"]
-        raise ConfigError(short) from None
 
 
 class AuthMessage(BaseModel):

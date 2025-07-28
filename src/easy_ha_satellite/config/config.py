@@ -28,6 +28,7 @@ class ConfigError(Exception):
     pass
 
 
+@functools.lru_cache(maxsize=1)
 def _load_yaml_file(file_path: Path) -> dict[str, Any]:
     try:
         logger.debug("Loading yaml from %s", file_path)
@@ -37,32 +38,27 @@ def _load_yaml_file(file_path: Path) -> dict[str, Any]:
                 raise ConfigError(f"{file_path} did not contain a top-level mapping")
             return data
     except FileNotFoundError as e:
+        logger.warning("Config file not found at %s", file_path)
         raise ConfigError(f"Config file not found: {file_path}") from e
     except yaml.YAMLError as e:
+        logger.warning(f"Error parsing YAML file {file_path}")
         raise ConfigError(f"Error parsing YAML file {file_path}: {e}") from e
 
 
+@functools.lru_cache(maxsize=1)
 def load_yaml_resource(rsrc_path) -> dict[str, Any]:
     # importlib.resources
     with as_file(rsrc_path) as tmp:
         return _load_yaml_file(tmp)
 
 
-@functools.lru_cache(maxsize=1)
-def load_config_dict() -> dict[str, Any]:
-    """
-    Load main config dict.
-    Order of precedence:
-        1. External file pointed to by CONFIG_PATH env var
-        2. Packaged default config asset
-    """
+def get_config_value(key: str) -> Any:
     if CONFIG_PATH:
-        return _load_yaml_file(Path(CONFIG_PATH))
-    return load_yaml_resource(_DEFAULT_CONFIG_RSRC)
-
-
-def get_config_value(key: str, default: Any = None) -> Any:
-    return load_config_dict().get(key, default)
+        try:
+            return _load_yaml_file(Path(CONFIG_PATH))[key]
+        except (KeyError, ConfigError):
+            return load_yaml_resource(_DEFAULT_CONFIG_RSRC)[key]
+    return load_yaml_resource(_DEFAULT_CONFIG_RSRC)[key]
 
 
 def get_root_logger() -> logging.Logger:

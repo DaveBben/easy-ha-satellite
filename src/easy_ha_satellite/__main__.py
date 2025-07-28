@@ -28,14 +28,23 @@ from easy_ha_satellite.config import ConfigError, get_root_logger
 from easy_ha_satellite.home_assistant import (
     HASSHttpClient,
     HASSocketClient,
+    HomeAssistantConfig,
     Pipeline,
     PipelineEventType,
-    load_hass_config,
 )
 from easy_ha_satellite.wake_word import load_wake_word_config
 from easy_ha_satellite.wake_word_worker import WakeEvent, WakeEventType, detector_process
 
 logger = get_root_logger()
+
+# Required Environment Variables
+required_env = ["HA_TOKEN", "HA_HOST", "HA_PORT", "HA_SSL"]
+for env in required_env:
+    try:
+        os.environ[env]
+    except KeyError:
+        logger.error("Missing Environment variable %s", env)
+        sys.exit(1)
 
 
 async def run_pipeline(mic: AudioCapture, speaker: AudioPlayback, pipe: Pipeline) -> str:
@@ -94,14 +103,11 @@ async def main() -> None:
             in_audio_cfg = load_audio_capture_config()
             out_audio_cfg = load_audio_playback_config()
             wake_cfg = load_wake_word_config()
-            hass_cfg = load_hass_config()
+            hass_cfg = HomeAssistantConfig(
+                host=os.environ["HA_HOST"], port=os.environ["HA_PORT"], ssl=os.environ["HA_SSL"]
+            )
         except ConfigError as e:
             logger.error("%s", e)
-            sys.exit(1)
-
-        token = os.getenv("HASS_TOKEN")
-        if not token:
-            logger.error("HASS_TOKEN not set")
             sys.exit(1)
 
         ctx = get_context("spawn")
@@ -132,7 +138,9 @@ async def main() -> None:
             speaker = await stack.enter_async_context(
                 AudioPlayback(out_audio_cfg, os.getenv("OUTPUT_AUDIO_DEVICE"))
             )
-            hass = await stack.enter_async_context(HASSocketClient(hass_cfg, token))
+            hass = await stack.enter_async_context(
+                HASSocketClient(hass_cfg, os.environ["HA_TOKEN"])
+            )
             try:
                 await asyncio.wait_for(asyncio.to_thread(bootstrap.wait), timeout=10)
             except TimeoutError:
@@ -166,7 +174,9 @@ async def main() -> None:
                     hass.on_event = pipe.handle_event
                     media_url = await run_pipeline(mic=mic, speaker=speaker, pipe=pipe)
                     if media_url:
-                        async with HASSHttpClient(config=hass_cfg, api_token=token) as session:
+                        async with HASSHttpClient(
+                            config=hass_cfg, api_token=os.environ["HA_TOKEN"]
+                        ) as session:
                             data = await session.download_media(media_url)
                             await speaker.play(data)
 

@@ -3,7 +3,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, PositiveFloat, ValidationError
 
-from easy_ha_satellite.config import ConfigError, load_config_dict
+from easy_ha_satellite.config import ConfigError, get_config_value
 
 InferenceFramework = Literal["onnx", "tflite"]
 
@@ -30,7 +30,7 @@ def load_wake_word_config() -> WakewordConfig:
     Raise ConfigError if validation fails.
     """
     try:
-        data = load_config_dict().get("wakeword", {})
+        data = get_config_value("wakeword")
         return WakewordConfig.model_validate(data)
     except ValidationError as e:
         short = e.errors(include_url=False)[0]["msg"]
