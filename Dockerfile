@@ -93,5 +93,5 @@ ENV WAKEWORD_MODEL_NAME=${WAKEWORD_MODEL_NAME}
 USER appuser
 
 
-CMD ["python3", "main.py"]
+CMD ["python3", "-m" "easy_ha_satellite"]
 # CMD ["bash"]
