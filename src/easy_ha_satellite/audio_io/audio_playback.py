@@ -112,7 +112,7 @@ class AudioPlayback:
 
             # 4. Signal the end of the stream.
             await self.put_chunk(None)
-            logger.info("Audio stream finished feeding.")
+            logger.debug("Audio stream finished feeding.")
 
         except asyncio.CancelledError:
             logger.info("Audio feeder task was cancelled.")
@@ -175,7 +175,7 @@ class AudioPlayback:
         if self._is_running:
             return
 
-        logger.info("Starting Audio Output stream (device=%s)", self._device or "default")
+        logger.debug("Starting Audio Output stream (device=%s)", self._device or "default")
         try:
             # Clear queue before starting
             self._clear_buffer()

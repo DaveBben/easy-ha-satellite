@@ -5,9 +5,9 @@ from enum import Enum
 from typing import Any
 
 from easy_ha_satellite.config import get_logger
-from easy_ha_satellite.home_assistant import HASSocketClient
 
 from .schemas import AssistPipelineRun
+from .websocket_client import HASSocketClient
 
 logger = get_logger("pipeline")
 

@@ -158,7 +158,6 @@ async def main() -> None:
                     hass.on_event = pipe.handle_event
                     media_url = await run_pipeline(mic=mic, speaker=speaker, pipe=pipe)
                     if media_url:
-                        logger.info(media_url)
                         async with HASSHttpClient(config=hass_cfg, api_token=token) as session:
                             data = await session.download_media(media_url)
                             await speaker.play(data)

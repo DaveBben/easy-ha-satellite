@@ -24,12 +24,12 @@ class HASSHttpClient:
 
         headers = {"Authorization": f"Bearer {self._token}"}
         self._session = aiohttp.ClientSession(headers=headers)
-        logger.info("HASS HTTP Client started.")
+        logger.debug("HASS HTTP Client started.")
 
     async def stop(self) -> None:
         if self._session and not self._session.closed:
             await self._session.close()
-            logger.info("HASS HTTP Client stopped.")
+            logger.debug("HASS HTTP Client stopped.")
         self._session = None
 
     def _get_url(self, path: str) -> str:
@@ -60,7 +60,7 @@ class HASSHttpClient:
         timeout = aiohttp.ClientTimeout(total=20, sock_read=15)
         buffer = bytearray()
 
-        logger.info(f"Downloading media from: {url}")
+        logger.debug(f"Downloading media from: {url}")
         try:
             async with self._session.get(url, timeout=timeout) as resp:
                 # Raise an exception for non-2xx status codes
