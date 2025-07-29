@@ -6,6 +6,7 @@ from .config import (
     get_root_logger,
     load_yaml_resource,
 )
+from .schemas import AppConfig
 
 __all__ = [
     "get_root_logger",
@@ -15,4 +16,5 @@ __all__ = [
     "load_yaml_resource",
     "get_config_value",
     "DEFAULT_AUDIO_RSRC",
+    "AppConfig",
 ]

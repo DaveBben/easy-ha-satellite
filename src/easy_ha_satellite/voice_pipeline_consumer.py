@@ -25,7 +25,7 @@ from easy_ha_satellite.audio_io import (
     OutputAudioConfig,
     play_alert,
 )
-from easy_ha_satellite.config import get_root_logger
+from easy_ha_satellite.config import AppConfig, get_root_logger
 from easy_ha_satellite.home_assistant import (
     HASSHttpClient,
     HASSocketClient,
@@ -45,8 +45,13 @@ async def run_pipeline(
     ws_client: HASSocketClient,
     http_client: HASSHttpClient,
     speaker: AudioPlayback,
+    app_cfg: AppConfig,
 ) -> None:
-    pipe = Pipeline(client=ws_client, sample_rate=mic_cfg.sample_rate)
+    end_stage = "tts"
+    if not app_cfg.enable_tts:
+        logger.info("TTS is disable")
+        end_stage = "intent"
+    pipe = Pipeline(client=ws_client, sample_rate=mic_cfg.sample_rate, end_stage=end_stage)
     ws_client.on_event = pipe.handle_event
 
     need_audio = asyncio.Event()
@@ -120,6 +125,7 @@ async def main(
     events_q: mp.Queue,
     audio_buffer: np.ndarray,
     write_index: Synchronized,
+    app_cfg: AppConfig,
 ) -> None:
     try:
         async with AsyncExitStack() as stack:
@@ -136,7 +142,7 @@ async def main(
             while not stop_event.is_set():
                 # Wait for detector to signal wake
                 try:
-                    event: WakeEvent = await asyncio.to_thread(events_q.get)
+                    event: WakeEvent = await asyncio.to_thread(events_q.get, timeout=1)
                 except queue.Empty:
                     continue
 
@@ -149,6 +155,7 @@ async def main(
                             ws_client=ha_ws_client,
                             http_client=ha_http_client,
                             speaker=speaker,
+                            app_cfg=app_cfg,
                         )
                     )
 
@@ -170,8 +177,10 @@ def voice_pipeline_consumer(
     mic_cfg: InputAudioConfig,
     speaker_cfg: OutputAudioConfig,
     ha_cfg: HomeAssistantConfig,
+    app_cfg: AppConfig,
 ):
     try:
+        logger.info(f"[{os.getpid()}] Voice Pipeline process starting.")
         # Connect to shared memory
         existing_shm = shared_memory.SharedMemory(name=shm_name)
         samples_per_chunk = mic_cfg.chunk_samples * mic_cfg.channels
@@ -181,7 +190,6 @@ def voice_pipeline_consumer(
             buffer=existing_shm.buf,
         )
         signal.signal(signal.SIGINT, signal.SIG_IGN)
-        logger.info("Voice Pipeline process starting.")
         with asyncio.Runner(loop_factory=uvloop.new_event_loop) as runner:
             runner.run(
                 main(
@@ -192,6 +200,7 @@ def voice_pipeline_consumer(
                     audio_buffer=buffer,
                     write_index=write_index,
                     events_q=events_q,
+                    app_cfg=app_cfg,
                 )
             )
     except Exception:
@@ -199,4 +208,4 @@ def voice_pipeline_consumer(
     finally:
         if "existing_shm" in locals():
             existing_shm.close()
-        logger.info("Wake word consumer stopped.")
+        logger.info(f"[{os.getpid()}] Voice Pipeline process shutting down.")

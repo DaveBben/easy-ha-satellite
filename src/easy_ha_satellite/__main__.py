@@ -16,7 +16,7 @@ from easy_ha_satellite.audio_io import (
     load_audio_capture_config,
     load_audio_playback_config,
 )
-from easy_ha_satellite.config import ConfigError, get_root_logger
+from easy_ha_satellite.config import AppConfig, ConfigError, get_root_logger
 from easy_ha_satellite.home_assistant import (
     HomeAssistantConfig,
 )
@@ -46,6 +46,7 @@ def main() -> None:
         hass_cfg = HomeAssistantConfig(
             host=os.environ["HA_HOST"], port=os.environ["HA_PORT"], ssl=os.environ["HA_SSL"]
         )
+        app_cfg = AppConfig(enable_tts=os.getenv("ENABLE_TTS", "true"))
         out_audio_cfg = load_audio_playback_config()
     except ConfigError as e:
         logger.error("%s", e)
@@ -95,6 +96,7 @@ def main() -> None:
                     input_cfg,
                     out_audio_cfg,
                     hass_cfg,
+                    app_cfg,
                 ),
             ),
         ]

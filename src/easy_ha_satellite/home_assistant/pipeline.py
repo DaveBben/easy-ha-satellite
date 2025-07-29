@@ -40,6 +40,8 @@ class Pipeline:
         client: HASSocketClient,
         sample_rate: int,
         timeout_secs: int = 30,
+        start_stage: str = "stt",
+        end_stage: str = "tts",
     ):
         self._client = client
         self._id = client.get_command_id()
@@ -48,6 +50,8 @@ class Pipeline:
         self._sample_rt = sample_rate
         self._media_url = None
         self._stt_output = None
+        self._start_stage = start_stage
+        self._end_stage = end_stage
         self._done = False
         self._events: asyncio.Queue[PipelineEvent] = asyncio.Queue()
         self._handlers: dict[str, Callable[[dict[str, Any]], Awaitable[None]]] = {
@@ -78,7 +82,11 @@ class Pipeline:
         logger.info("Starting Pipeline")
         await self._client.send(
             AssistPipelineRun(
-                id=self._id, timeout=self._timeout, input={"sample_rate": self._sample_rt}
+                id=self._id,
+                start_stage=self._start_stage,
+                end_stage=self._end_stage,
+                timeout=self._timeout,
+                input={"sample_rate": self._sample_rt},
             )
         )
 

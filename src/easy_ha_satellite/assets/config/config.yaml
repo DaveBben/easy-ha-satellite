@@ -1,12 +1,16 @@
 # WakeWord Detection
 wakeword:
-  threshold: 0.6
+  threshold: 0.7
   cooldown_sec: 1.0
   sample_ms: 80
   openWakeWord:
     model: "hey_jarvis"
     inference_framework: "onnx"
 
+
+# app settings
+app:
+  enable_tts: true
 
 # Home Assistant
 home_assistant:

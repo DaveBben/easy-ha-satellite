@@ -30,7 +30,7 @@ class WakeWordDetector:
             scores = self._model.predict(chunk)
             score = float(scores[self._cfg.openWakeWord.model])
             if score > self._cfg.threshold:
-                logger.debug("Wakeword score=%.2f", score)
+                logger.info("Wakeword score=%.2f", score)
                 self._last_fire = now
                 self._model.reset()
                 return (True, self._cfg.openWakeWord.model)

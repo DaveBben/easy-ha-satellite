@@ -1,6 +1,7 @@
 # Background worker for WakeWord Detection
 import multiprocessing as mp
 import multiprocessing.shared_memory as shared_memory
+import os
 import signal
 import time
 from dataclasses import dataclass
@@ -40,12 +41,12 @@ def wake_word_consumer(
     stop_event: Event,
 ):
     try:
+        logger.info(f"[{os.getpid()}] Wake Word process starting.")
         # Make this process ignore SIGINT (Ctrl+C). The main process will
         # handle it and signal us to stop via the stop_event.
         signal.signal(signal.SIGINT, signal.SIG_IGN)
         local_read_index = 0
         detector = WakeWordDetector(wake_cfg)
-        logger.info("Wake Word Processing started.")
         existing_shm = shared_memory.SharedMemory(name=shared_mem_name)
         samples_per_chunk = mic_cfg.chunk_samples * mic_cfg.channels
         buffer = np.ndarray(
@@ -71,4 +72,4 @@ def wake_word_consumer(
     finally:
         if "existing_shm" in locals():
             existing_shm.close()
-        logger.info("Wake word consumer stopped.")
+        logger.info(f"[{os.getpid()}] Wake Word process shutting down.")

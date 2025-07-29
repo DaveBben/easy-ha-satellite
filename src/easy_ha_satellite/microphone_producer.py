@@ -1,5 +1,6 @@
 # Background worker for WakeWord Detection
 import multiprocessing.shared_memory as shared_memory
+import os
 import signal
 from multiprocessing.sharedctypes import Synchronized
 from multiprocessing.synchronize import Event, Lock
@@ -20,7 +21,7 @@ def microphone_producer(
     stop_event: Event,
     device: str | None = None,
 ):
-    logger.info("Microphone input process starting.")
+    logger.info(f"[{os.getpid()}] Microphone process starting.")
     signal.signal(signal.SIGINT, signal.SIG_IGN)
     existing_shm = shared_memory.SharedMemory(name=shared_mem_name)
     samples_per_chunk = mic_cfg.chunk_samples * mic_cfg.channels
@@ -55,4 +56,4 @@ def microphone_producer(
         logger.exception("An unrecoverable error occurred in the microphone producer.")
     finally:
         existing_shm.close()
-        logger.info("Microphone input process stopped.")
+        logger.info(f"[{os.getpid()}] Microphone process shutting down.")
