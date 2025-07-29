@@ -173,25 +173,6 @@ wheels = [
 ]
 
 [[package]]
-name = "cython"
-version = "3.1.2"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/18/40/7b17cd866158238db704965da1b5849af261dbad393ea3ac966f934b2d39/cython-3.1.2.tar.gz", hash = "sha256:6bbf7a953fa6762dfecdec015e3b054ba51c0121a45ad851fa130f63f5331381", size = 3184825, upload-time = "2025-06-09T07:08:48.465Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/1f/de/502ddebaf5fe78f13cd6361acdd74710d3a5b15c22a9edc0ea4c873a59a5/cython-3.1.2-cp311-cp311-macosx_10_9_x86_64.whl", hash = "sha256:5548573e0912d7dc80579827493315384c462e2f15797b91a8ed177686d31eb9", size = 3007792, upload-time = "2025-06-09T07:09:28.777Z" },
-    { url = "https://files.pythonhosted.org/packages/bb/c8/91b00bc68effba9ba1ff5b33988052ac4d98fc1ac3021ade7261661299c6/cython-3.1.2-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:4bf3ea5bc50d80762c490f42846820a868a6406fdb5878ae9e4cc2f11b50228a", size = 2870798, upload-time = "2025-06-09T07:09:30.745Z" },
-    { url = "https://files.pythonhosted.org/packages/f4/4b/29d290f14607785112c00a5e1685d766f433531bbd6a11ad229ab61b7a70/cython-3.1.2-cp311-cp311-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:20ce53951d06ab2bca39f153d9c5add1d631c2a44d58bf67288c9d631be9724e", size = 3131280, upload-time = "2025-06-09T07:09:32.785Z" },
-    { url = "https://files.pythonhosted.org/packages/38/3c/7c61e9ce25377ec7c4aa0b7ceeed34559ebca7b5cfd384672ba64eeaa4ba/cython-3.1.2-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:e05a36224e3002d48c7c1c695b3771343bd16bc57eab60d6c5d5e08f3cbbafd8", size = 3223898, upload-time = "2025-06-09T07:09:35.345Z" },
-    { url = "https://files.pythonhosted.org/packages/10/96/2d3fbe7e50e98b53ac86fefb48b64262b2e1304b3495e8e25b3cd1c3473e/cython-3.1.2-cp311-cp311-manylinux_2_5_i686.manylinux1_i686.manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:dbc0fc0777c7ab82297c01c61a1161093a22a41714f62e8c35188a309bd5db8e", size = 3291527, upload-time = "2025-06-09T07:09:37.502Z" },
-    { url = "https://files.pythonhosted.org/packages/bd/e4/4cd3624e250d86f05bdb121a567865b9cca75cdc6dce4eedd68e626ea4f8/cython-3.1.2-cp311-cp311-musllinux_1_2_aarch64.whl", hash = "sha256:18161ef3dd0e90a944daa2be468dd27696712a5f792d6289e97d2a31298ad688", size = 3184034, upload-time = "2025-06-09T07:09:40.225Z" },
-    { url = "https://files.pythonhosted.org/packages/24/de/f8c1243c3e50ec95cb81f3a7936c8cf162f28050db8683e291c3861b46a0/cython-3.1.2-cp311-cp311-musllinux_1_2_i686.whl", hash = "sha256:ca45020950cd52d82189d6dfb6225737586be6fe7b0b9d3fadd7daca62eff531", size = 3386084, upload-time = "2025-06-09T07:09:42.206Z" },
-    { url = "https://files.pythonhosted.org/packages/c8/95/2365937da44741ef0781bb9ecc1f8f52b38b65acb7293b5fc7c3eaee5346/cython-3.1.2-cp311-cp311-musllinux_1_2_x86_64.whl", hash = "sha256:aaae97d6d07610224be2b73a93e9e3dd85c09aedfd8e47054e3ef5a863387dae", size = 3309974, upload-time = "2025-06-09T07:09:44.801Z" },
-    { url = "https://files.pythonhosted.org/packages/9b/b8/280eed114110a1a3aa9e2e76bcd06cdd5ef0df7ab77c0be9d5378ca28c57/cython-3.1.2-cp311-cp311-win32.whl", hash = "sha256:3d439d9b19e7e70f6ff745602906d282a853dd5219d8e7abbf355de680c9d120", size = 2482942, upload-time = "2025-06-09T07:09:46.583Z" },
-    { url = "https://files.pythonhosted.org/packages/a2/50/0aa65be5a4ab65bde3224b8fd23ed795f699d1e724ac109bb0a32036b82d/cython-3.1.2-cp311-cp311-win_amd64.whl", hash = "sha256:8efa44ee2f1876e40eb5e45f6513a19758077c56bf140623ccab43d31f873b61", size = 2686535, upload-time = "2025-06-09T07:09:48.345Z" },
-    { url = "https://files.pythonhosted.org/packages/25/d6/ef8557d5e75cc57d55df579af4976935ee111a85bbee4a5b72354e257066/cython-3.1.2-py3-none-any.whl", hash = "sha256:d23fd7ffd7457205f08571a42b108a3cf993e83a59fe4d72b42e6fc592cf2639", size = 1224753, upload-time = "2025-06-09T07:08:44.849Z" },
-]
-
-[[package]]
 name = "dependency-groups"
 version = "1.3.1"
 source = { registry = "https://pypi.org/simple" }
@@ -222,7 +203,6 @@ dependencies = [
     { name = "platformdirs" },
     { name = "pydantic" },
     { name = "pydub" },
-    { name = "pyroomacoustics" },
     { name = "pyyaml" },
     { name = "sounddevice" },
     { name = "soundfile" },
@@ -245,7 +225,6 @@ requires-dist = [
     { name = "platformdirs", specifier = ">=4.3.8" },
     { name = "pydantic", specifier = ">=2.11,<3" },
     { name = "pydub", specifier = ">=0.25,<0.26" },
-    { name = "pyroomacoustics", specifier = ">=0.8.4,<0.9" },
     { name = "pyyaml", specifier = ">=6.0.2,<7" },
     { name = "sounddevice", specifier = ">=0.5.2,<0.6" },
     { name = "soundfile", specifier = ">=0.13,<1" },
@@ -515,15 +494,6 @@ wheels = [
 ]
 
 [[package]]
-name = "pybind11"
-version = "3.0.0"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/ef/83/698d120e257a116f2472c710932023ad779409adf2734d2e940f34eea2c5/pybind11-3.0.0.tar.gz", hash = "sha256:c3f07bce3ada51c3e4b76badfa85df11688d12c46111f9d242bc5c9415af7862", size = 544819, upload-time = "2025-07-10T16:52:09.335Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/41/9c/85f50a5476832c3efc67b6d7997808388236ae4754bf53e1749b3bc27577/pybind11-3.0.0-py3-none-any.whl", hash = "sha256:7c5cac504da5a701b5163f0e6a7ba736c713a096a5378383c5b4b064b753f607", size = 292118, upload-time = "2025-07-10T16:52:07.828Z" },
-]
-
-[[package]]
 name = "pycparser"
 version = "2.22"
 source = { registry = "https://pypi.org/simple" }
@@ -606,22 +576,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/0f/49/4cea918a08f02817aabae639e3d0ac046fef9f9180518a3ad394e22da148/pyreadline3-3.5.4.tar.gz", hash = "sha256:8d57d53039a1c75adba8e50dd3d992b28143480816187ea5efbd5c78e6c885b7", size = 99839, upload-time = "2024-09-19T02:40:10.062Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/5a/dc/491b7661614ab97483abf2056be1deee4dc2490ecbf7bff9ab5cdbac86e1/pyreadline3-3.5.4-py3-none-any.whl", hash = "sha256:eaf8e6cc3c49bcccf145fc6067ba8643d1df34d604a1ec0eccbf7a18e6d3fae6", size = 83178, upload-time = "2024-09-19T02:40:08.598Z" },
-]
-
-[[package]]
-name = "pyroomacoustics"
-version = "0.8.4"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "cython" },
-    { name = "numpy" },
-    { name = "pybind11" },
-    { name = "scipy" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/bb/3a/7bc15b0d46e1e2de5f4a6a1a568f52316f003530061e0caff3e3365b32fc/pyroomacoustics-0.8.4.tar.gz", hash = "sha256:cb70e511c41952f0f578355ae261b72acc4b688d995d02780ac0847d0b400d99", size = 35092344, upload-time = "2025-05-18T15:20:26.888Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/17/e7/c27e250777fc5ddb6037c46203def80a58fad1e45e01ff4ef702c2596931/pyroomacoustics-0.8.4-cp311-cp311-macosx_10_9_universal2.whl", hash = "sha256:f26a5a04e235594783a3c92b7213bbd70b615865061bdf80c148756fd91db764", size = 34909067, upload-time = "2025-05-18T15:23:26.556Z" },
-    { url = "https://files.pythonhosted.org/packages/da/a3/a7af33408d31707ea30fd5435dff4933fad1c6c7e3fdf3653ca425eb5949/pyroomacoustics-0.8.4-cp311-cp311-win_amd64.whl", hash = "sha256:313c71e468f9e4a812514ea0811d5625344823b3bb23333420d22939aeb8822d", size = 34361222, upload-time = "2025-05-18T15:28:10.057Z" },
 ]
 
 [[package]]

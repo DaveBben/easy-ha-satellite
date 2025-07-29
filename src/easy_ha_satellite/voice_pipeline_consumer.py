@@ -85,27 +85,27 @@ async def run_pipeline(
         finally:
             if not recorded_chunks:
                 logger.warning("No audio was pumped, nothing to save.")
-                return
         logger.info("Writing recorded audio to file...")
-        try:
-            # 1. Combine all the small chunks into one large NumPy array
-            final_audio_array = np.concatenate(recorded_chunks)
+        if os.getenv('RECORD_INPUT'):
+            try:
+                # 1. Combine all the small chunks into one large NumPy array
+                final_audio_array = np.concatenate(recorded_chunks)
 
-            # 2. Generate a unique filename using a timestamp
-            timestamp = int(time.time())
-            filename = f"audio_pump_dump_{timestamp}.wav"
+                # 2. Generate a unique filename using a timestamp
+                timestamp = int(time.time())
+                filename = f"audio_pump_dump_{timestamp}.wav"
 
-            # 3. Use the wave module to write a standard WAV file
-            with wave.open(filename, "wb") as wav_file:
-                wav_file.setnchannels(mic_cfg.channels)
-                wav_file.setsampwidth(np.dtype(mic_cfg.dtype).itemsize)
-                wav_file.setframerate(mic_cfg.sample_rate)
-                wav_file.writeframes(final_audio_array.tobytes())
+                # 3. Use the wave module to write a standard WAV file
+                with wave.open(filename, "wb") as wav_file:
+                    wav_file.setnchannels(mic_cfg.channels)
+                    wav_file.setsampwidth(np.dtype(mic_cfg.dtype).itemsize)
+                    wav_file.setframerate(mic_cfg.sample_rate)
+                    wav_file.writeframes(final_audio_array.tobytes())
 
-            logger.info(f"Successfully saved recorded audio to {filename}")
+                logger.info(f"Successfully saved recorded audio to {filename}")
 
-        except Exception as e:
-            logger.exception(f"Failed to save audio file: {e}")
+            except Exception as e:
+                logger.exception(f"Failed to save audio file: {e}")
 
     async def event_pump():
         async for evt in pipe:
@@ -163,7 +163,7 @@ async def main(
             while not stop_event.is_set():
                 # Wait for detector to signal wake
                 try:
-                    event: WakeEvent = await asyncio.to_thread(events_q.get, timeout=1)
+                    event: WakeEvent = await asyncio.to_thread(events_q.get)
                 except queue.Empty:
                     continue
 

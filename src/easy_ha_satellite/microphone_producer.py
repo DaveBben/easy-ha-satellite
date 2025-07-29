@@ -27,7 +27,7 @@ def microphone_producer(
     buffer = np.ndarray(
         (mic_cfg.buffer_slots, samples_per_chunk), dtype=mic_cfg.dtype, buffer=existing_shm.buf
     )
-    capture = AudioCapture(mic_cfg, device, reduce_noise=True)
+    capture = AudioCapture(mic_cfg, device)
     try:
         with capture:
             logger.info("Microphone capture started.")
