@@ -85,8 +85,8 @@ async def run_pipeline(
         finally:
             if not recorded_chunks:
                 logger.warning("No audio was pumped, nothing to save.")
-        logger.info("Writing recorded audio to file...")
-        if os.getenv('RECORD_INPUT'):
+        if os.getenv("RECORD_INPUT"):
+            logger.info("Writing recorded audio to file...")
             try:
                 # 1. Combine all the small chunks into one large NumPy array
                 final_audio_array = np.concatenate(recorded_chunks)
@@ -157,8 +157,12 @@ async def main(
             speaker = await stack.enter_async_context(
                 AudioPlayback(out_audio_cfg, os.getenv("OUTPUT_AUDIO_DEVICE"))
             )
-            ha_http_client = await stack.enter_async_context(HASSHttpClient(ha_cfg, os.environ["HA_TOKEN"]))
-            ha_ws_client = await stack.enter_async_context(HASSocketClient(ha_cfg, os.environ["HA_TOKEN"]))
+            ha_http_client = await stack.enter_async_context(
+                HASSHttpClient(ha_cfg, os.environ["HA_TOKEN"])
+            )
+            ha_ws_client = await stack.enter_async_context(
+                HASSocketClient(ha_cfg, os.environ["HA_TOKEN"])
+            )
             await play_alert(Alert.CONNECTED, speaker)
             while not stop_event.is_set():
                 # Wait for detector to signal wake
@@ -168,6 +172,7 @@ async def main(
                     continue
 
                 if event.type == WakeEventType.DETECTED:
+                    logger.info("Keyword Detected")
                     asyncio.create_task(
                         run_pipeline(
                             mic_audio=audio_buffer,
@@ -183,6 +188,10 @@ async def main(
         pass
     except asyncio.CancelledError:
         pass
+
+
+def test_record():
+    pass
 
 
 def voice_pipeline_consumer(

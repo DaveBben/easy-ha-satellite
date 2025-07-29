@@ -23,7 +23,7 @@ class InputAudioConfig(BaseModel):
     sample_rate: Rate = 16_000
     channels: IntGE1 = 1
     dtype: SupportedDTypes = "int16"
-    chunk_ms: Millis = 20
+    chunk_ms: Millis = 10
     buffer_duration_s: IntGE1 = 5
 
     @property

@@ -32,6 +32,7 @@ dependencies = [
   "pyyaml>=6.0.2,<7",
   "pydub>=0.25,<0.26",
   "platformdirs>=4.3.8",
+  "webrtc-noise-gain>=1.2.5",
 ]
 
 [project.scripts]

@@ -9,6 +9,7 @@ from multiprocessing.sharedctypes import Synchronized
 from multiprocessing.synchronize import Event
 
 import numpy as np
+from numpy.typing import NDArray
 
 from easy_ha_satellite.audio_io import InputAudioConfig
 from easy_ha_satellite.config import get_root_logger
@@ -54,7 +55,7 @@ def wake_word_consumer(
             if local_read_index < write_index.value:
                 # Read the next available chunk
                 slot_index = local_read_index % mic_cfg.buffer_slots
-                audio_chunk = buffer[slot_index]
+                audio_chunk: NDArray = buffer[slot_index]
                 detected, model_name = detector.detect(audio_chunk)
                 if detected:
                     logger.info(f"{model_name} detected")

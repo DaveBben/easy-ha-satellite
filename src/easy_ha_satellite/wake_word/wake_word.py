@@ -1,7 +1,7 @@
 import time
 
-import numpy as np
 import openwakeword
+from numpy.typing import NDArray
 from openwakeword.model import Model
 
 from easy_ha_satellite.config import get_logger
@@ -19,7 +19,7 @@ class WakeWordDetector:
         self._model = self._load_model()
         self._last_fire: float = 0.0
 
-    def detect(self, chunk: bytes) -> tuple[bool, str]:
+    def detect(self, chunk: NDArray) -> tuple[bool, str]:
         """Return True if wakeword fired (and sets cooldown)."""
         # Cooldown guard
         now = time.monotonic()
@@ -27,7 +27,7 @@ class WakeWordDetector:
             return (False, self._cfg.openWakeWord.model)
 
         try:
-            scores = self._model.predict(np.frombuffer(chunk, dtype=np.int16))
+            scores = self._model.predict(chunk)
             score = float(scores[self._cfg.openWakeWord.model])
             if score > self._cfg.threshold:
                 logger.debug("Wakeword score=%.2f", score)

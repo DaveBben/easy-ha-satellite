@@ -3,6 +3,7 @@ from contextlib import suppress
 from queue import Empty, Full, Queue
 
 import sounddevice as sd
+from webrtc_noise_gain import AudioProcessor
 
 from easy_ha_satellite.config import get_logger
 
@@ -17,6 +18,9 @@ class AudioCapture:
         cfg: InputAudioConfig,
         input_device: str | None = None,
         queue_maxsize: int = 256,
+        webrtc_noise_gain: bool = True,
+        auto_gain_dbfs: int = 31,
+        noise_supression_level: int = 2,
     ):
         self._cfg = cfg
         self._device = input_device
@@ -24,6 +28,9 @@ class AudioCapture:
         self._q: Queue[bytes] = Queue(maxsize=queue_maxsize)
         self._closed = False
 
+        self._audio_proc: AudioProcessor = None
+        if webrtc_noise_gain:
+            self._audio_proc = AudioProcessor(auto_gain_dbfs, noise_supression_level)
 
     def start(self, block: bool = True) -> None:
         """Acquire the mic and start the stream."""
@@ -52,11 +59,11 @@ class AudioCapture:
             return
         if status:
             logger.warning("Input status: %s", status)
-
-        processed_bytes = indata
-
+        audio = bytes(indata)
+        if self._audio_proc:
+            audio = self._audio_proc.Process10ms(bytes(indata)).audio
         try:
-            self._q.put_nowait(processed_bytes)
+            self._q.put_nowait(audio)
         except Full:
             logger.warning("Input queue full; dropping audio chunk.")
 
