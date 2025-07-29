@@ -159,6 +159,9 @@ This guarantees responsive interruption.
 
 ---
 
+## Contributing
+Please do 🙂
+
 ## Roadmap / Ideas
 This project is still in its infancy. There are a lot of things to be done, but unfortunately not enough time to get to all of them. This lise includes:
 
