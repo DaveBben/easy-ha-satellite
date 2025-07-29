@@ -1,13 +1,12 @@
 # Easy Home Assistant Satellite
-
-A plug‑and‑play Raspberry Pi (or any Linux box) **satellite** for [Home Assistant Voice Pipelines](https://developers.home-assistant.io/docs/voice/pipelines/). It runs a local wake word detector (OpenWakeWord), streams mic audio to HA for STT/intent handling, and plays back TTS locally. Audio playback can be aborted mid‑clip (e.g., when you say the wake word again).
+The goal of this project is to be an plug‑and‑play Raspberry Pi (or any Linux box) **satellite** for [Home Assistant Voice Pipelines](https://developers.home-assistant.io/docs/voice/pipelines/). It runs a local wake word detector (OpenWakeWord), streams mic audio to HA for STT/intent handling, and plays back TTS locally. This project should remain simple and as a docker first solution.
 
 ---
 
 ## Features
 
 - **Local wake word** using OpenWakeWord
-- **Low‑latency streaming** of PCM audio to Home Assistant’s Assist pipeline.
+- **Optional TTS Feedback** audio from Home Assistant.
 - **Simple Docker deployment** with minimal env configuration.
 - Works with **any HA TTS/STT provider** configured in your pipeline.
 
@@ -23,23 +22,23 @@ A plug‑and‑play Raspberry Pi (or any Linux box) **satellite** for [Home Assi
   - A **Voice Pipeline** configured (STT, TTS, intent handler)
 - Raspberry Pi (or any Linux host) with access to your microphone/speakers
 
-### 1. Clone & Build
+### 1. Clone & Run
 
 ```bash
 git clone https://github.com/yourname/easy-ha-satellite.git
 cd easy-ha-satellite
 ```
 
+#### Option 1: Docker Compose
+
 ### 2. Create `.env`
 
 ```ini
-HASS_HOST=homeassistant.local
-HASS_PORT=8123
-HASS_TOKEN=YOUR_LONG_LIVED_TOKEN
-SECURE_WEBSOCKET=false  # true if you expose HTTPS/WSS
-WAKEWORD_MODEL_NAME=hey_jarvis
-WW_THRESHOLD=0.7
-INFERENCE_FRAMEWORK=onnx
+HA_HOST=homeassistant.local
+HA_PORT=8123
+HA_TOKEN=YOUR_LONG_LIVED_TOKEN
+HA_SSL=false  # true if you expose HTTPS/WSS
+ENABLE_TTS=true
 UID=$(id -u)
 GID=$(id -g)
 AUDIO_GID=29   # typical 'audio' group on Debian; check with getent group audio
@@ -58,13 +57,11 @@ services:
         AUDIO_GID: ${AUDIO_GID}
         WAKEWORD_MODEL_NAME: ${WAKEWORD_MODEL_NAME}
     environment:
-      HASS_HOST: ${HASS_HOST}
-      HASS_PORT: ${HASS_PORT}
-      HASS_TOKEN: ${HASS_TOKEN}
-      SECURE_WEBSOCKET: ${SECURE_WEBSOCKET}
-      WAKEWORD_MODEL_NAME: ${WAKEWORD_MODEL_NAME}
-      WW_THRESHOLD: ${WW_THRESHOLD}
-      INFERENCE_FRAMEWORK: ${INFERENCE_FRAMEWORK}
+      HA_HOST: ${HA_HOST}
+      HA_PORT: ${HA_PORT}
+      HA_TOKEN: ${HA_TOKEN}
+      HA_SSL: ${HA_SSL}
+      AUDIO_GID: ${AUDIO_GID}
       INPUT_AUDIO_DEVICE: ""  # optional: name/id from sd.query_devices()
       OUTPUT_AUDIO_DEVICE: "" # optional
       PUID: ${UID}
@@ -85,11 +82,13 @@ Run it:
 docker compose up --build -d
 ```
 
-You should see logs like:
+Now say, "hey jarvis" and see what happens.
 
-```
-✅ WebSocket connection established.
-Listening for hey_jarvis...
+#### Option 2: Using uv
+This project uses [uv](https://docs.astral.sh/uv/getting-started/installation/). You can run using the following command:
+
+```cmd
+uv run -m easy_ha_satellite
 ```
 
 ---
@@ -98,66 +97,43 @@ Listening for hey_jarvis...
 
 | Variable              | Required | Default        | Description                                   |
 | --------------------- | -------- | -------------- | --------------------------------------------- |
-| `HASS_HOST`           | ✅        | –              | Home Assistant host/IP (no scheme)            |
-| `HASS_PORT`           | ✅        | –              | Home Assistant port                           |
-| `HASS_TOKEN`          | ✅        | –              | Long-lived access token for HA API/WebSocket  |
-| `SECURE_WEBSOCKET`    | ❌        | `true`         | If `true`, use `https/wss`; else `http/ws`    |
-| `WAKEWORD_MODEL_NAME` | ❌        | `hey_jarvis`   | OpenWakeWord model to download/load           |
-| `WW_THRESHOLD`        | ❌        | `0.5`          | Wakeword detection threshold                  |
-| `INFERENCE_FRAMEWORK` | ❌        | `onnx`         | `onnx` or `tflite` (per OWW support)          |
+| `HA_HOST`           | ✅        | –              | Home Assistant host/IP (no scheme)            |
+| `HA_PORT`           | ✅        | –              | Home Assistant port                           |
+| `HA_TOKEN`          | ✅        | –              | Long-lived access token for HA API/WebSocket  |
+| `HA_SSL`    | ❌        | `true`         | If `true`, use `https/wss`; else `http/ws`    |
+| `ENABLE_TTS` | ❌      | `true`    | Whether to output tts. Make sure your Home Assistant pipeline has TTS Enabled           |
 | `INPUT_AUDIO_DEVICE`  | ❌        | system default | Name/index from `sounddevice.query_devices()` |
 | `OUTPUT_AUDIO_DEVICE` | ❌        | system default | Playback device name/index                    |
 | `PUID`, `PGID`        | ❌        | host uid/gid   | Run container as your user (file perms)       |
 | `AUDIO_GID`           | ❌        | 29             | Group id of `audio` to access `/dev/snd`      |
+
+
+## Overriding Config
+A default configuration is created for you. The goal of the default config is to get you up and running with sane defaults. You can supply your own config by setting the environment variable `CONFIG_PATH` to a location of a yaml file. Within the config, you can override information like the default wake word used.
+
+```yml
+# WakeWord Detection
+wakeword:
+  threshold: 0.7
+  cooldown_sec: 1.0
+  sample_ms: 80
+  openWakeWord:
+    model: "hey_jarvis"
+    inference_framework: "onnx"
+
+# app settings
+app:
+  enable_tts: true
+```
 
 ---
 
 ## Audio Abort Behavior
 
 - The player writes **small chunks** (≈20 ms) so it can check an `ABORT_PLAYBACK` flag between writes.
-- When a new wake word fires during long TTS, we:
-  1. Set abort flag
-  2. `stream.abort()` to cut playback
-  3. Drain pending audio from the queue
-
+- When a new wake word fires during long TTS we attempt to abort playback
 This guarantees responsive interruption.
 
----
-
-## Bare-Metal (No Docker)
-
-#### Install system libs (Debian/Ubuntu example)
-```cmd
-sudo apt-get update
-sudo apt-get install -y portaudio19-dev libsndfile1
-```
-
-#### Install uv (if you don't have it)
-
-```cmd
-curl -LsSf https://astral.sh/uv/install.sh | sh
-```
-
-#### Create/activate the env and install deps
-```cmd
-uv sync
-```      
-
-####  Export environment variables (adjust to your setup)
-```cmd
-export HASS_HOST=homeassistant.local
-export HASS_PORT=8123
-export HASS_TOKEN=YOUR_LONG_LIVED_TOKEN
-export SECURE_WEBSOCKET=false
-export WAKEWORD_MODEL_NAME=hey_jarvis
-export WW_THRESHOLD=0.7
-export INFERENCE_FRAMEWORK=onnx
-```
-
-#### Run
-```cmd
-uv run src/main.py
-```
 ---
 
 ## Troubleshooting
@@ -169,7 +145,7 @@ uv run src/main.py
 
 **Wake word never triggers**
 
-- Lower `WW_THRESHOLD` or verify mic is correct (`INPUT_AUDIO_DEVICE`).
+- Lower `threshold` or verify mic is correct (`INPUT_AUDIO_DEVICE`).
 - Check logs for detection scores.
 
 **TTS never plays / crashes**
@@ -183,23 +159,12 @@ uv run src/main.py
 
 ---
 
-## Development Notes
-
-- Python 3.11+
-- Uses `uvloop` for performance.
-
-### Useful Debug Snippets
-
-```python
-import sounddevice as sd
-print(sd.query_devices())
-```
-
----
-
 ## Roadmap / Ideas
+This project is still in its infancy. There are a lot of things to be done, but unfortunately not enough time to get to all of them. This lise includes:
 
-- Add WebRTC Audio Enhancments
+- Echo Noise Cancellation
+- Support for Timers
+- Better Noise Reduction
 - Local STT/TTS fallback option
 
 ---
