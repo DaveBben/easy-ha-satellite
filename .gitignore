@@ -180,7 +180,4 @@ secrets.yaml
 .vscode
 app/recordings
 
-# audio
-*.wav
-
 *.DS_Store
