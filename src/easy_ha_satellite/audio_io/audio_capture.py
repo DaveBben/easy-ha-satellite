@@ -1,5 +1,5 @@
 import asyncio
-from multiprocessing.synchronize import Semaphore
+from contextlib import suppress
 from queue import Empty, Full, Queue
 from typing import Any
 
@@ -20,7 +20,6 @@ class AudioCapture:
         cfg: InputAudioConfig,
         input_device: str | None = None,
         queue_maxsize: int = 256,
-        mic_lock: Semaphore | None = None,
         reduce_noise: bool = True,
     ):
         self._cfg = cfg
@@ -28,8 +27,6 @@ class AudioCapture:
         self._stream = None
         self._q: Queue[bytes] = Queue(maxsize=queue_maxsize)
         self._closed = False
-        self._lock = mic_lock
-        self._have_lock = False
 
         # --- Noise Reduction State ---
         self._reduce_noise = reduce_noise
@@ -45,17 +42,11 @@ class AudioCapture:
                     channels=self._cfg.channels,
                 )
 
-    def start(self, block: bool = True, lock_timeout: float | None = None) -> None:
-        """Acquire the mic lock (if provided) and start the stream."""
+    def start(self, block: bool = True) -> None:
+        """Acquire the mic and start the stream."""
         if self._stream and self._stream.active:
             logger.warning("Input stream already running.")
             return
-
-        if self._lock:
-            ok = self._lock.acquire(block, lock_timeout)
-            if not ok:
-                raise RuntimeError("Could not acquire microphone lock")
-            self._have_lock = True
 
         try:
             self._stream = sd.RawInputStream(
@@ -70,12 +61,13 @@ class AudioCapture:
             logger.debug("Audio input stream started (device=%s)", self._device or "default")
         except Exception:
             logger.exception("Error starting input stream")
-            self._cleanup_lock()
             self._stream = None
             raise
 
     def _audio_cb(self, indata: bytes, frames: int, time_info, status) -> None:
         """The audio callback. Applies noise reduction if enabled."""
+        if self._closed:
+            return
         if status:
             logger.warning("Input status: %s", status)
 
@@ -93,7 +85,6 @@ class AudioCapture:
             # Convert back to original dtype and then to bytes
             if np.issubdtype(self._cfg.dtype, np.integer):
                 denoised_chunk = (denoised_chunk * 32767).astype(self._cfg.dtype)
-
             processed_bytes = denoised_chunk.tobytes()
 
         try:
@@ -113,17 +104,18 @@ class AudioCapture:
         self._drain_queue()
 
     def stop(self) -> None:
+        self._closed = True
+        with suppress(Full):
+            self._q.put_nowait(None)
         if self._stream:
             try:
                 self._stream.stop()
-                self._stream.close()
+                self._stream.abort()
             except Exception:
                 logger.exception("Error stopping input stream")
             finally:
                 self._stream = None
-        self._closed = True
         self._drain_queue()
-        self._cleanup_lock()
         logger.debug("Audio input stream stopped.")
 
     def __enter__(self) -> "AudioCapture":
@@ -140,26 +132,19 @@ class AudioCapture:
             except Empty:
                 break
 
-    def _cleanup_lock(self) -> None:
-        if self._have_lock and self._lock:
-            self._lock.release()
-            self._have_lock = False
-
 
 class AsyncCaptureSession:
     """
-    Async wrapper to take the mic lock and AudioCapture synchronously.
+    Async wrapper to AudioCapture synchronously.
     """
 
-    def __init__(self, cfg, sem: Semaphore, device: str | None = None, reduce_noise: bool = True):
+    def __init__(self, cfg, device: str | None = None, reduce_noise: bool = True):
         self._cfg = cfg
-        self._sem = sem
         self._device = device
         self._reduce_noise = reduce_noise
         self._cap: AudioCapture | None = None
 
     async def __aenter__(self) -> AudioCapture:
-        await asyncio.to_thread(self._sem.acquire)
         self._cap = AudioCapture(self._cfg, self._device, reduce_noise=self._reduce_noise)
         await asyncio.to_thread(self._cap.start)
         return self._cap
@@ -167,4 +152,3 @@ class AsyncCaptureSession:
     async def __aexit__(self, exc_type, exc, tb) -> None:
         assert self._cap is not None
         await asyncio.to_thread(self._cap.stop)
-        self._sem.release()

@@ -6,7 +6,6 @@ services:
         PUID: ${UID}
         PGID: ${GID}
         AUDIO_GID: ${AUDIO_GID}
-        WAKEWORD_MODEL_NAME: hey_jarvis
     volumes:
       - /home/dave/.asoundrc:/etc/asound.conf
     environment:

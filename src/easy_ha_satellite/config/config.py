@@ -11,11 +11,10 @@ from platformdirs import user_log_dir
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_CONFIG_RSRC = files("easy_ha_satellite") / "assets" / "config" / "config.yaml"
-
-# The following configs can not be overridden with user values
-_DEFAULT_LOGGING_RSRC = files("easy_ha_satellite") / "assets" / "config" / "logging.yaml"
-DEFAULT_AUDIO_RSRC = files("easy_ha_satellite") / "assets" / "config" / "audio.yaml"
+_ASSETS = files("easy_ha_satellite") / "assets"
+_DEFAULT_CONFIG_RSRC = _ASSETS / "config" / "config.yaml"
+_DEFAULT_LOGGING_RSRC = _ASSETS / "config" / "logging.yaml"
+DEFAULT_AUDIO_RSRC = _ASSETS / "config" / "audio.yaml"
 
 # External overrides via env variables
 CONFIG_PATH = os.getenv("CONFIG_PATH")

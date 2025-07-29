@@ -23,7 +23,7 @@ classifiers = [
 dependencies = [
   "sounddevice>=0.5.2,<0.6",
   "openwakeword>=0.6,<0.7",
-  "numpy>=1.26,<2", 
+  "numpy>=1.26,<2",
   "websockets>=15,<16",
   "uvloop>=0.21,<0.22",
   "aiohttp>=3.12,<4",
@@ -32,6 +32,7 @@ dependencies = [
   "pyyaml>=6.0.2,<7",
   "pydub>=0.25,<0.26",
   "pyroomacoustics>=0.8.4,<0.9",
+  "platformdirs>=4.3.8",
 ]
 
 [project.scripts]
@@ -46,8 +47,11 @@ dev = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/easy_ha_satellite"]
-include = ["src/easy_ha_satellite/assets/**/*"]
-only-packages = true
+include = [
+  "src/easy_ha_satellite/assets/sounds/**/*",
+  "src/easy_ha_satellite/assets/config/**/*",
+]
+only-packages = false
 
 [tool.ruff]
 target-version = "py311"

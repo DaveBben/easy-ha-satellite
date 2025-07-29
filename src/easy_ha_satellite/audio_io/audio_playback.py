@@ -9,7 +9,6 @@ from pydub import AudioSegment
 
 from easy_ha_satellite.config import get_logger
 
-from .audio_processing.utils import prepare_audio
 from .schemas import OutputAudioConfig
 
 logger = get_logger("audio_playback")
@@ -26,55 +25,38 @@ class AudioPlayback:
         self._feeder_task: asyncio.Task | None = None
         self._is_running = False
 
-    async def play(self, audio_data: np.ndarray | bytes, source_sr: int | None = None) -> None:
+    @classmethod
+    def remix_audio(cls, audio_data: bytes, cfg: OutputAudioConfig) -> bytes:
+        logger.debug("Remixing Audio")
+        song = AudioSegment.from_file(io.BytesIO(audio_data))
+
+        if song.frame_rate != cfg.sample_rate:
+            song = song.set_frame_rate(cfg.sample_rate)
+        if song.channels != cfg.channels:
+            song = song.set_channels(cfg.channels)
+
+        target_sample_width = np.dtype(cfg.dtype).itemsize
+        if song.sample_width != target_sample_width:
+            song = song.set_sample_width(target_sample_width)
+
+        samples = np.array(song.get_array_of_samples())
+        final_audio_data = samples.reshape((-1, song.channels)) if song.channels > 1 else samples
+        audio_bytes = final_audio_data.tobytes()
+        return audio_bytes
+
+    async def play(self, audio_data: bytes, remix: bool = True) -> None:
         """
         Plays audio, ensuring it's converted to the correct output format first.
-
-        This is the primary method for playback. It handles two cases:
-        1. audio_data is bytes: Decodes from any format (MP3, WAV, etc.) and prepares it.
-        2. audio_data is ndarray: Prepares the raw PCM data. `source_sr` is required.
-
-        Args:
-            audio_data: The audio data to play.
-            source_sr: The sample rate of the audio. Required if audio_data is a
-                       NumPy array, but ignored if it's bytes.
         """
+        # 1. Stop any currently playing audio.
         await self.stop()
-
-        final_audio_data: np.ndarray
         try:
             if isinstance(audio_data, bytes):
-                logger.debug("Received raw bytes. Decoding and preparing audio...")
-                song = AudioSegment.from_file(io.BytesIO(audio_data))
-
-                if song.frame_rate != self._cfg.sample_rate:
-                    song = song.set_frame_rate(self._cfg.sample_rate)
-                if song.channels != self._cfg.channels:
-                    song = song.set_channels(self._cfg.channels)
-
-                target_sample_width = np.dtype(self._cfg.dtype).itemsize
-                if song.sample_width != target_sample_width:
-                    song = song.set_sample_width(target_sample_width)
-
-                samples = np.array(song.get_array_of_samples())
-                final_audio_data = (
-                    samples.reshape((-1, song.channels)) if song.channels > 1 else samples
-                )
-
-            elif isinstance(audio_data, np.ndarray):
-                logger.debug("Received NumPy array. Preparing audio...")
-                if source_sr is None:
-                    raise ValueError(
-                        "source_sr must be provided when passing a NumPy array to play()"
-                    )
-
-                final_audio_data = prepare_audio(
-                    audio_data=audio_data,
-                    source_sr=source_sr,
-                    target_sr=self._cfg.sample_rate,
-                    target_channels=self._cfg.channels,
-                    target_dtype=self._cfg.dtype,
-                )
+                final_audio_data = audio_data
+                if remix:
+                    final_audio_data = AudioPlayback.remix_audio(audio_data, self._cfg)
+                logger.debug("Starting new audio stream feeder.")
+                self._feeder_task = asyncio.create_task(self._prime_and_feed(final_audio_data))
             else:
                 raise TypeError(f"Unsupported audio_data type: {type(audio_data)}")
 
@@ -82,16 +64,12 @@ class AudioPlayback:
             logger.error(f"Failed to prepare audio for playback: {e}")
             return
 
-        logger.debug("Starting new audio stream feeder.")
-        self._feeder_task = asyncio.create_task(self._prime_and_feed(final_audio_data))
-
-    async def _prime_and_feed(self, audio_data: np.ndarray):
+    async def _prime_and_feed(self, audio_bytes: bytes):
         """
         Primes the buffer with the first chunk, starts the stream, then feeds the rest.
         This prevents an initial click/pop from a buffer underrun.
         """
         try:
-            audio_bytes = audio_data.tobytes()
             chunk_size_bytes = self._cfg.bytes_per_chunk
 
             # 1. Prime the buffer with the first chunk.

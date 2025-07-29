@@ -8,6 +8,7 @@ from easy_ha_satellite.config import ConfigError, get_config_value
 InferenceFramework = Literal["onnx", "tflite"]
 
 Threshold = Annotated[float, Field(ge=0.0, le=1.0)]
+Millis = Annotated[int, Field(gt=0, le=1_000)]
 
 
 class OpenWakeWord(BaseModel):
@@ -19,6 +20,7 @@ class OpenWakeWord(BaseModel):
 class WakewordConfig(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
     threshold: Threshold = 0.6
+    sample_ms: Millis = 80
     cooldown_sec: PositiveFloat = 2.0
     openWakeWord: OpenWakeWord = Field(default_factory=OpenWakeWord)
 

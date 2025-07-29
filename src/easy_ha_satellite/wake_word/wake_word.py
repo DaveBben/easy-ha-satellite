@@ -1,6 +1,7 @@
 import time
 
 import numpy as np
+import openwakeword
 from openwakeword.model import Model
 
 from easy_ha_satellite.config import get_logger
@@ -8,6 +9,8 @@ from easy_ha_satellite.config import get_logger
 from .schemas import WakewordConfig
 
 logger = get_logger("wake_word_detector")
+
+openwakeword.utils.download_models()
 
 
 class WakeWordDetector:
