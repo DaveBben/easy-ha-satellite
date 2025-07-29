@@ -7,13 +7,9 @@ and to handle intents.
 import asyncio
 import multiprocessing as mp
 import multiprocessing.shared_memory as shared_memory
-
-# Background worker for WakeWord Detection
 import os
 import queue
 import signal
-import time
-import wave
 from asyncio import TaskGroup
 from contextlib import AsyncExitStack
 from multiprocessing.sharedctypes import Synchronized
@@ -58,8 +54,6 @@ async def run_pipeline(
     need_audio.set()
 
     async def audio_pump():
-        # A list to hold all audio chunks for the current pumping session
-        recorded_chunks = []
         try:
             while not stop_all.is_set():
                 # 1. Wait for the signal to start pumping audio
@@ -74,7 +68,6 @@ async def run_pipeline(
                     while local_read_index >= write_index.value:
                         await asyncio.sleep(0.01)
                     chunk: np.ndarray = mic_audio[local_read_index % mic_cfg.buffer_slots]
-                    recorded_chunks.append(chunk)
                     await pipe.send_audio(chunk.tobytes())
 
                     # Move to the next chunk
@@ -82,30 +75,6 @@ async def run_pipeline(
 
         except asyncio.CancelledError:
             pass
-        finally:
-            if not recorded_chunks:
-                logger.warning("No audio was pumped, nothing to save.")
-        if os.getenv("RECORD_INPUT"):
-            logger.info("Writing recorded audio to file...")
-            try:
-                # 1. Combine all the small chunks into one large NumPy array
-                final_audio_array = np.concatenate(recorded_chunks)
-
-                # 2. Generate a unique filename using a timestamp
-                timestamp = int(time.time())
-                filename = f"audio_pump_dump_{timestamp}.wav"
-
-                # 3. Use the wave module to write a standard WAV file
-                with wave.open(filename, "wb") as wav_file:
-                    wav_file.setnchannels(mic_cfg.channels)
-                    wav_file.setsampwidth(np.dtype(mic_cfg.dtype).itemsize)
-                    wav_file.setframerate(mic_cfg.sample_rate)
-                    wav_file.writeframes(final_audio_array.tobytes())
-
-                logger.info(f"Successfully saved recorded audio to {filename}")
-
-            except Exception as e:
-                logger.exception(f"Failed to save audio file: {e}")
 
     async def event_pump():
         async for evt in pipe:
@@ -172,7 +141,6 @@ async def main(
                     continue
 
                 if event.type == WakeEventType.DETECTED:
-                    logger.info("Keyword Detected")
                     asyncio.create_task(
                         run_pipeline(
                             mic_audio=audio_buffer,
