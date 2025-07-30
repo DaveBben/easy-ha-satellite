@@ -10,6 +10,7 @@ import multiprocessing.shared_memory as shared_memory
 import os
 import queue
 import signal
+import threading
 from asyncio import TaskGroup
 from contextlib import AsyncExitStack
 from multiprocessing.sharedctypes import Synchronized
@@ -37,6 +38,62 @@ from easy_ha_satellite.home_assistant import (
 from easy_ha_satellite.wake_word_consumer import WakeEvent, WakeEventType
 
 logger = get_root_logger()
+
+
+class AsyncQueueReader:
+    """
+    Efficiently bridges a multiprocessing.Queue to asyncio by using a single
+    persistent thread instead of creating threads for each read operation.
+    """
+
+    def __init__(self, mp_queue: mp.Queue, loop: asyncio.AbstractEventLoop):
+        self._mp_queue = mp_queue
+        self._loop = loop
+        self._async_queue: asyncio.Queue[WakeEvent | None] = asyncio.Queue()
+        self._shutdown = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._started = False
+
+    def start(self):
+        """Start the reader thread."""
+        if self._started:
+            return
+        self._started = True
+        self._thread = threading.Thread(target=self._reader_thread, daemon=True)
+        self._thread.start()
+        logger.debug("Started AsyncQueueReader thread")
+
+    def _reader_thread(self):
+        """Thread that continuously reads from mp.Queue and puts to asyncio.Queue."""
+        while not self._shutdown.is_set():
+            try:
+                # Use a short timeout to check shutdown periodically
+                event = self._mp_queue.get(timeout=0.1)
+                # Use call_soon_threadsafe to safely put into async queue
+                self._loop.call_soon_threadsafe(self._async_queue.put_nowait, event)
+            except queue.Empty:
+                continue
+            except Exception:
+                logger.exception("Error in AsyncQueueReader thread")
+
+    async def get(self, timeout: float | None = None) -> WakeEvent:
+        """Get an event from the queue with optional timeout."""
+        if not self._started:
+            self.start()
+
+        if timeout is None:
+            return await self._async_queue.get()
+        else:
+            return await asyncio.wait_for(self._async_queue.get(), timeout=timeout)
+
+    def stop(self):
+        """Stop the reader thread."""
+        if self._started:
+            self._shutdown.set()
+            if self._thread:
+                self._thread.join(timeout=1.0)
+            self._started = False
+            logger.debug("Stopped AsyncQueueReader thread")
 
 
 async def run_pipeline(
@@ -128,6 +185,10 @@ async def main(
     write_index: Synchronized,
     app_cfg: AppConfig,
 ) -> None:
+    # Create the async queue reader
+    loop = asyncio.get_running_loop()
+    queue_reader = AsyncQueueReader(events_q, loop)
+
     try:
         async with AsyncExitStack() as stack:
             speaker = await stack.enter_async_context(
@@ -147,8 +208,8 @@ async def main(
             while not stop_event.is_set():
                 # Wait for detector to signal wake
                 try:
-                    event: WakeEvent = await asyncio.to_thread(events_q.get, timeout=1)
-                except queue.Empty:
+                    event: WakeEvent = await queue_reader.get(timeout=1.0)
+                except TimeoutError:
                     continue
 
                 if event.type == WakeEventType.DETECTED:
@@ -168,6 +229,8 @@ async def main(
         pass
     except asyncio.CancelledError:
         pass
+    finally:
+        queue_reader.stop()
 
 
 def test_record():
