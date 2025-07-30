@@ -1,6 +1,9 @@
 import asyncio
 import io
+import queue
 import threading
+from dataclasses import dataclass
+from enum import Enum
 
 import numpy as np
 import sounddevice as sd
@@ -13,14 +16,28 @@ from .schemas import OutputAudioConfig
 logger = get_logger("audio_playback")
 
 
+class PlaybackCommand(Enum):
+    PLAY = "play"
+    STOP = "stop"
+    SHUTDOWN = "shutdown"
+
+
+@dataclass
+class PlaybackItem:
+    command: PlaybackCommand
+    audio_data: bytes | None = None
+    future: asyncio.Future | None = None
+
+
 class AudioPlayback:
     def __init__(self, cfg: OutputAudioConfig, output_device: str | None = None):
         self._cfg = cfg
         self._device = output_device
 
+        self._playback_queue: queue.Queue[PlaybackItem] = queue.Queue()
         self._playback_thread: threading.Thread | None = None
-        self._playback_lock = threading.Lock()
-        self._playback_id = 0  # Used to signal the active playback task
+        self._thread_started = False
+        self._shutdown_event = threading.Event()
 
     @classmethod
     def remix_audio(cls, audio_data: bytes, cfg: OutputAudioConfig) -> bytes:
@@ -41,53 +58,55 @@ class AudioPlayback:
         audio_bytes = final_audio_data.tobytes()
         return audio_bytes
 
-    async def play(self, audio_data: bytes, remix: bool = True) -> None:
-        """
-        Plays audio by starting a new playback thread. Immediately stops any
-        previously playing audio.
-        """
-        loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, self._stop_and_play_sync, audio_data, remix)
-
-    def _stop_and_play_sync(self, audio_data: bytes, remix: bool):
-        """The new synchronous core of the play logic."""
-        thread_to_join = None
-        with self._playback_lock:
-            # 1. Invalidate any existing playback thread by incrementing the ID.
-            self._playback_id += 1
-
-            # Grab a reference to the old thread to join it later, outside the lock.
-            if self._playback_thread and self._playback_thread.is_alive():
-                thread_to_join = self._playback_thread
-
-            # Prepare the audio data.
-            try:
-                final_audio_data = audio_data
-                if remix:
-                    final_audio_data = self.remix_audio(final_audio_data, self._cfg)
-            except Exception as e:
-                logger.error(f"Failed to prepare audio for playback: {e}")
-                return
-
-            # Create and start the new playback thread.
-            logger.debug("Starting new playback thread.")
+    def _start_playback_thread(self):
+        """Start the persistent playback thread if not already running."""
+        if not self._thread_started:
+            self._thread_started = True
             self._playback_thread = threading.Thread(
-                target=self._playback_thread_target,
-                args=(final_audio_data, self._playback_id),
+                target=self._playback_worker,
+                daemon=True,
             )
             self._playback_thread.start()
+            logger.debug("Started persistent playback thread")
 
-        # Now, outside the lock, wait for the old thread to finish.
-        if thread_to_join:
-            logger.debug("Waiting for previous playback thread to stop...")
-            thread_to_join.join()
+    async def play(self, audio_data: bytes, remix: bool = True) -> None:
+        """
+        Queues audio for playback. Immediately stops any currently playing audio.
+        """
+        self._start_playback_thread()
 
-    def _playback_thread_target(self, audio_bytes: bytes, expected_id: int):
-        """
-        This function runs in a separate thread and handles the actual audio playback.
-        It uses a blocking stream for simplicity and efficiency.
-        """
+        # Prepare audio data
         try:
+            final_audio_data = audio_data
+            if remix:
+                final_audio_data = await asyncio.to_thread(
+                    self.remix_audio, final_audio_data, self._cfg
+                )
+        except Exception as e:
+            logger.error(f"Failed to prepare audio for playback: {e}")
+            return
+
+        # Stop any current playback
+        self._playback_queue.put(PlaybackItem(PlaybackCommand.STOP))
+
+        # Queue new audio
+        loop = asyncio.get_running_loop()
+        future = loop.create_future()
+        self._playback_queue.put(PlaybackItem(PlaybackCommand.PLAY, final_audio_data, future))
+
+        # Wait for playback to complete
+        await future
+
+    def _playback_worker(self):
+        """
+        Persistent worker thread that processes audio playback commands from the queue.
+        """
+        logger.debug("Playback worker thread started")
+        stream = None
+        current_future = None
+
+        try:
+            # Create the output stream once
             stream = sd.OutputStream(
                 samplerate=self._cfg.sample_rate,
                 channels=self._cfg.channels,
@@ -95,55 +114,104 @@ class AudioPlayback:
                 dtype=self._cfg.dtype,
             )
             stream.start()
-            logger.debug(f"Playback thread {expected_id} started stream on device {self._device}")
+            logger.debug(f"Created persistent stream on device {self._device}")
 
-            chunk_size = (
-                self._cfg.chunk_samples * self._cfg.channels * np.dtype(self._cfg.dtype).itemsize
-            )
-            total_bytes = len(audio_bytes)
+            while not self._shutdown_event.is_set():
+                try:
+                    # Wait for commands with timeout
+                    item = self._playback_queue.get(timeout=0.1)
 
-            for i in range(0, total_bytes, chunk_size):
-                # Check if we should still be playing ---
-                with self._playback_lock:
-                    if self._playback_id != expected_id:
-                        logger.debug(f"Playback {expected_id} superseded. Stopping.")
-                        break  # Exit the loop immediately
+                    if item.command == PlaybackCommand.SHUTDOWN:
+                        logger.debug("Received shutdown command")
+                        break
 
-                chunk = audio_bytes[i : i + chunk_size]
-                pcm_data = np.frombuffer(chunk, dtype=self._cfg.dtype)
-                # Reshape for multi-channel audio before writing to the stream
-                if self._cfg.channels > 1:
-                    pcm_data = pcm_data.reshape(-1, self._cfg.channels)
+                    elif item.command == PlaybackCommand.STOP:
+                        # Just mark current playback as complete
+                        if current_future and not current_future.done():
+                            current_future.set_result(None)
+                        current_future = None
+                        logger.debug("Stopped current playback")
 
-                stream.write(pcm_data)
+                    elif item.command == PlaybackCommand.PLAY:
+                        # Mark previous playback as complete
+                        if current_future and not current_future.done():
+                            current_future.set_result(None)
 
-            stream.stop()
-            stream.close()
-            logger.debug(f"Playback thread {expected_id} finished cleanly.")
+                        current_future = item.future
 
-        except Exception:
-            logger.exception(f"Error in playback thread {expected_id}.")
+                        # Play the audio
+                        self._play_audio_on_stream(stream, item.audio_data)
+
+                        # Mark playback as complete
+                        if current_future and not current_future.done():
+                            current_future.set_result(None)
+                        current_future = None
+
+                except queue.Empty:
+                    continue
+                except Exception:
+                    logger.exception("Error in playback worker")
+                    if current_future and not current_future.done():
+                        current_future.set_exception(Exception("Playback failed"))
+                    current_future = None
+
+        finally:
+            if stream:
+                stream.stop()
+                stream.close()
+            logger.debug("Playback worker thread stopped")
+
+    def _play_audio_on_stream(self, stream: sd.OutputStream, audio_bytes: bytes):
+        """Play audio data on the existing stream."""
+        chunk_size = (
+            self._cfg.chunk_samples * self._cfg.channels * np.dtype(self._cfg.dtype).itemsize
+        )
+        total_bytes = len(audio_bytes)
+
+        for i in range(0, total_bytes, chunk_size):
+            # Check if we should stop
+            if not self._playback_queue.empty():
+                # Peek at the queue to see if there's a stop command
+                try:
+                    next_item = self._playback_queue.queue[0]
+                    if next_item.command in (PlaybackCommand.STOP, PlaybackCommand.SHUTDOWN):
+                        logger.debug("Interrupting playback for new command")
+                        break
+                except IndexError:
+                    pass
+
+            chunk = audio_bytes[i : i + chunk_size]
+            pcm_data = np.frombuffer(chunk, dtype=self._cfg.dtype)
+
+            # Reshape for multi-channel audio
+            if self._cfg.channels > 1:
+                pcm_data = pcm_data.reshape(-1, self._cfg.channels)
+
+            stream.write(pcm_data)
 
     async def stop(self) -> None:
-        """Stops the current audio playback thread."""
-        loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, self._stop_sync)
-
-    def _stop_sync(self):
-        """The new synchronous core of the stop logic."""
-        with self._playback_lock:
-            if self._playback_thread and self._playback_thread.is_alive():
-                logger.debug("Stopping playback thread...")
-                self._playback_id += 1  # Signal the thread to stop
-                self._playback_thread.join()
-                logger.debug("Playback thread stopped.")
-            self._playback_thread = None
+        """Stops any current audio playback."""
+        if self._thread_started:
+            self._playback_queue.put(PlaybackItem(PlaybackCommand.STOP))
 
     async def __aenter__(self):
         return self
 
     async def __aexit__(self, exc_type, exc, tb):
-        await self.stop()
+        await self.shutdown()
+
+    async def shutdown(self):
+        """Shutdown the playback thread and clean up resources."""
+        if self._thread_started:
+            logger.debug("Shutting down playback thread")
+            self._shutdown_event.set()
+            self._playback_queue.put(PlaybackItem(PlaybackCommand.SHUTDOWN))
+
+            if self._playback_thread:
+                await asyncio.to_thread(self._playback_thread.join, timeout=2.0)
+
+            self._thread_started = False
+            logger.debug("Playback thread shutdown complete")
 
     @property
     def audio_config(self) -> OutputAudioConfig:
