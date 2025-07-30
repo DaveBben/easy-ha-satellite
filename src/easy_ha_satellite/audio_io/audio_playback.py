@@ -261,6 +261,46 @@ class AudioPlayback:
             self._thread_started = False
             logger.debug("Playback thread shutdown complete")
 
+    def play_immediate(self, audio_data: bytes, remix: bool = True) -> None:
+        """
+        Play audio immediately with minimal latency. Bypasses the queue system.
+        Intended for urgent alerts and notifications that need instant playback.
+        
+        This is a synchronous function that blocks until playback is complete.
+        Use for short audio clips (< 2 seconds) to avoid blocking the calling thread.
+        """
+        logger.debug(f"play_immediate() called with {len(audio_data)} bytes")
+        
+        try:
+            # Prepare audio data
+            final_audio_data = audio_data
+            if remix:
+                final_audio_data = self.remix_audio(final_audio_data, self._cfg)
+            
+            # Create and start stream immediately
+            with sd.OutputStream(
+                samplerate=self._cfg.sample_rate,
+                channels=self._cfg.channels,
+                device=self._device,
+                dtype=self._cfg.dtype,
+            ) as stream:
+                logger.debug("Immediate playback stream created and started")
+                
+                # Convert audio data to numpy array
+                pcm_data = np.frombuffer(final_audio_data, dtype=self._cfg.dtype)
+                
+                # Reshape for multi-channel audio
+                if self._cfg.channels > 1:
+                    pcm_data = pcm_data.reshape(-1, self._cfg.channels)
+                
+                # Play all audio data at once
+                stream.write(pcm_data)
+                logger.debug("Immediate playback completed")
+                
+        except Exception as e:
+            logger.error(f"Failed to play audio immediately: {e}")
+            raise
+
     @property
     def audio_config(self) -> OutputAudioConfig:
         return self._cfg
