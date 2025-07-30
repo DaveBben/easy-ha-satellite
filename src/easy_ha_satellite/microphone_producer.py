@@ -30,13 +30,10 @@ def microphone_producer(
         (mic_cfg.buffer_slots, samples_per_chunk), dtype=mic_cfg.dtype, buffer=existing_shm.buf
     )
 
-    # Use higher gain for better speech recognition
     capture = AudioCapture(
         mic_cfg,
         device,
-        webrtc_noise_gain=True,
-        auto_gain_dbfs=35,  # Higher value for louder output
-        noise_supression_level=2,
+        webrtc_noise_gain=True
     )
     try:
         with capture:
