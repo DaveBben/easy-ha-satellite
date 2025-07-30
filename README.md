@@ -166,6 +166,7 @@ Please do 🙂
 This project is still in its infancy. There are a lot of things to be done, but unfortunately not enough time to get to all of them. This lise includes:
 
 - Echo Noise Cancellation
+- Automatic docker hub pipeline
 - Support for Timers
 - Better Noise Reduction
 - Local STT/TTS fallback option

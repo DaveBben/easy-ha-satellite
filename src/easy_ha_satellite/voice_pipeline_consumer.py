@@ -24,6 +24,7 @@ from easy_ha_satellite.audio_io import (
     InputAudioConfig,
     OutputAudioConfig,
     play_alert,
+    preload_alerts,
 )
 from easy_ha_satellite.config import AppConfig, get_root_logger
 from easy_ha_satellite.home_assistant import (
@@ -138,6 +139,10 @@ async def main(
             ha_ws_client = await stack.enter_async_context(
                 HASSocketClient(ha_cfg, os.environ["HA_TOKEN"])
             )
+
+            # Pre-load all alert sounds to avoid lag on first playback
+            preload_alerts(speaker.audio_config)
+
             await play_alert(Alert.CONNECTED, speaker)
             while not stop_event.is_set():
                 # Wait for detector to signal wake

@@ -1,4 +1,4 @@
-from .alerts import Alert, play_alert
+from .alerts import Alert, play_alert, preload_alerts
 from .audio_capture import AsyncCaptureSession, AudioCapture
 from .audio_playback import AudioPlayback
 from .schemas import (
@@ -16,6 +16,7 @@ __all__ = [
     "load_audio_playback_config",
     "AudioPlayback",
     "play_alert",
+    "preload_alerts",
     "Alert",
     "AsyncCaptureSession",
 ]
