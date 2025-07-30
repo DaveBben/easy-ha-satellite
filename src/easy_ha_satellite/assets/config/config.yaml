@@ -1,0 +1,19 @@
+# WakeWord Detection
+wakeword:
+  threshold: 0.7
+  cooldown_sec: 1.0
+  sample_ms: 80
+  openWakeWord:
+    model: "hey_jarvis"
+    inference_framework: "onnx"
+
+
+# app settings
+app:
+  enable_tts: true
+
+# Home Assistant
+home_assistant:
+  host: 192.168.1.49
+  port: 8123
+  ssl: false

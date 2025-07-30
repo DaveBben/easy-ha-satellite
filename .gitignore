@@ -179,8 +179,6 @@ pyrightconfig.json
 secrets.yaml
 .vscode
 app/recordings
-
-# audio
-*.wav
+.claude
 
 *.DS_Store
