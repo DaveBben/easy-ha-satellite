@@ -28,7 +28,20 @@ def microphone_producer(
     buffer = np.ndarray(
         (mic_cfg.buffer_slots, samples_per_chunk), dtype=mic_cfg.dtype, buffer=existing_shm.buf
     )
-    capture = AudioCapture(mic_cfg, device)
+
+    # Check if we should use the simple audio processor
+    use_simple_processor = os.getenv("USE_SIMPLE_AUDIO_PROCESSOR", "true").lower() == "true"
+    if use_simple_processor:
+        logger.info("Using SimpleAudioProcessor for audio processing")
+
+    # Use higher gain for better speech recognition
+    capture = AudioCapture(
+        mic_cfg,
+        device,
+        use_simple_processor=use_simple_processor,
+        auto_gain_dbfs=35,  # Higher value for louder output
+        noise_supression_level=2,
+    )
     try:
         with capture:
             logger.info("Microphone capture started.")

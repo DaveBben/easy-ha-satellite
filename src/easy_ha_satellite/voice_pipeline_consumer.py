@@ -40,6 +40,54 @@ from easy_ha_satellite.wake_word_consumer import WakeEvent, WakeEventType
 logger = get_root_logger()
 
 
+async def _save_captured_audio(captured_chunks: list[bytes], mic_cfg: InputAudioConfig) -> None:
+    """
+    Save captured pipeline audio to a WAV file for analysis.
+    This runs in a thread to avoid blocking the main pipeline.
+    """
+    import datetime
+    import wave
+
+    def save_audio():
+        try:
+            # Generate timestamp-based filename
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            proc_type = (
+                "simple"
+                if os.getenv("USE_SIMPLE_AUDIO_PROCESSOR", "true").lower() == "true"
+                else "webrtc"
+            )
+            filename = f"pipeline_audio_{proc_type}_{timestamp}.wav"
+
+            # Combine all chunks
+            audio_data = b"".join(captured_chunks)
+
+            # Save to WAV file
+            with wave.open(filename, "wb") as wf:
+                wf.setnchannels(mic_cfg.channels)
+                wf.setsampwidth(2)  # 16-bit
+                wf.setframerate(mic_cfg.sample_rate)
+                wf.writeframes(audio_data)
+
+            # Calculate statistics
+            audio_array = np.frombuffer(audio_data, dtype=mic_cfg.dtype)
+            rms = np.sqrt(np.mean(audio_array.astype(np.float32) ** 2))
+            peak = np.max(np.abs(audio_array))
+            duration_ms = len(captured_chunks) * mic_cfg.chunk_ms
+
+            logger.info(f"Saved pipeline audio: {filename}")
+            logger.info(
+                f"Duration: {duration_ms}ms, RMS: {20 * np.log10(rms / 32768):.1f}dBFS, "
+                f"Peak: {20 * np.log10(peak / 32768):.1f}dBFS"
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to save captured audio: {e}")
+
+    # Save in thread to avoid blocking pipeline
+    await asyncio.to_thread(save_audio)
+
+
 class AsyncQueueReader:
     """
     Efficiently bridges a multiprocessing.Queue to asyncio by using a single
@@ -116,6 +164,10 @@ async def run_pipeline(
     stop_all = asyncio.Event()
     need_audio.set()
 
+    # Audio capture for testing/debugging
+    capture_audio = os.getenv("CAPTURE_PIPELINE_AUDIO", "false").lower() == "true"
+    captured_chunks = [] if capture_audio else None
+
     async def audio_pump():
         try:
             while not stop_all.is_set():
@@ -131,7 +183,13 @@ async def run_pipeline(
                     while local_read_index >= write_index.value:
                         await asyncio.sleep(0.01)
                     chunk: np.ndarray = mic_audio[local_read_index % mic_cfg.buffer_slots]
-                    await pipe.send_audio(chunk.tobytes())
+                    chunk_bytes = chunk.tobytes()
+
+                    # Capture audio for debugging if enabled
+                    if capture_audio:
+                        captured_chunks.append(chunk_bytes)
+
+                    await pipe.send_audio(chunk_bytes)
 
                     # Move to the next chunk
                     local_read_index += 1
@@ -169,6 +227,11 @@ async def run_pipeline(
         pass
     finally:
         stop_all.set()
+
+    # Save captured audio if enabled
+    if capture_audio and captured_chunks:
+        await _save_captured_audio(captured_chunks, mic_cfg)
+
     if pipe.media_url:
         data = await http_client.download_media(pipe.media_url)
         await speaker.play(data)
@@ -231,10 +294,6 @@ async def main(
         pass
     finally:
         queue_reader.stop()
-
-
-def test_record():
-    pass
 
 
 def voice_pipeline_consumer(
