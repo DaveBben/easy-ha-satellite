@@ -1,0 +1,11 @@
+audio_capture:
+  sample_rate: 16000
+  channels: 1
+  dtype: "int16"
+  chunk_ms: 10
+
+audio_playback:
+  sample_rate: 48000
+  channels: 2
+  dtype: "int16"
+  chunk_ms: 10

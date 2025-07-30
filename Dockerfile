@@ -18,7 +18,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     libasound2-dev \
     portaudio19-dev \
     gcc \
-    libportaudio2 \ 
+    libportaudio2 \
     libportaudiocpp0 \
     libc6-dev \
     build-essential \
@@ -30,15 +30,32 @@ WORKDIR /app
 
 RUN uv venv
 
-COPY pyproject.toml uv.lock ./
+COPY pyproject.toml ./
+COPY uv.lock ./
+
+# Installs package in venv
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --locked --no-dev
+    --mount=type=bind,source=uv.lock,target=uv.lock  \
+    --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
+    uv sync --locked --no-dev --no-install-project
+
+COPY src ./src
+RUN --mount=type=cache,target=/root/.cache \
+    uv sync \
+        --locked \
+        --no-dev \
+        --no-editable
+
 
 ##########################################################################
 # Application
 FROM --platform=$TARGETPLATFORM python:3.11-slim AS final
 
-LABEL org.opencontainers.image.title="wakeword-detector"
+ARG APP_VERSION=0.0.0-dev
+ENV HATCH_BUILD_VERSION=${APP_VERSION}
+
+LABEL org.opencontainers.image.version=${APP_VERSION}
+LABEL org.opencontainers.image.title="easy-ha-satellite"
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"] 
 
@@ -49,7 +66,7 @@ ENV PATH="/app/.venv/bin:$PATH"
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update && apt-get install -y --no-install-recommends \
-    python3-pyaudio nano pipewire-audio-client-libraries libpulse0  \
+    python3-pyaudio pipewire-audio-client-libraries libpulse0  \
     pipewire-alsa alsa-utils pipewire-audio pipewire-pulse ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
@@ -60,7 +77,7 @@ ARG PUID=1000
 # Group ID       
 ARG PGID=1000
 # Audio group ID       
-ARG AUDIO_GID=50 
+ARG AUDIO_GID=29 
 
 ENV PUID=${PUID} \
     PGID=${PGID} \
@@ -83,15 +100,9 @@ ENV PATH="/app/.venv/bin:$PATH"
 # Copy the entire pre-built virtual environment from the builder
 # Order matters here for good caching
 COPY --chown=appuser:appgroup --from=builder /app/.venv ./.venv
-COPY --chown=appuser:appgroup src/ .
-
-# Define build-time argument for the model name
-ARG WAKEWORD_MODEL_NAME=hey_jarvis
-ENV WAKEWORD_MODEL_NAME=${WAKEWORD_MODEL_NAME}
 
 
 USER appuser
 
 
-CMD ["python3", "main.py"]
-# CMD ["bash"]
+CMD ["python3", "-m", "easy_ha_satellite"]

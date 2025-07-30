@@ -6,17 +6,13 @@ services:
         PUID: ${UID}
         PGID: ${GID}
         AUDIO_GID: ${AUDIO_GID}
-        WAKEWORD_MODEL_NAME: hey_jarvis
     volumes:
       - /home/dave/.asoundrc:/etc/asound.conf
     environment:
-      HASS_HOST: ${HASS_HOST}
-      HASS_PORT: ${HASS_PORT}
-      HASS_TOKEN: ${HASS_TOKEN}
-      SECURE_WEBSOCKET: "false"
-      WAKEWORD_MODEL_NAME: hey_jarvis
-      WW_THRESHOLD: 0.7
-      INFERENCE_FRAMEWORK: onnx
+      HA_HOST: ${HA_HOST}
+      HA_PORT: ${HA_PORT}
+      HA_TOKEN: ${HA_TOKEN}
+      HA_SSL: ${HA_SSL}
       PUID: ${UID}
       PGID: ${GID}
       AUDIO_GID: ${AUDIO_GID}
