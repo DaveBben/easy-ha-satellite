@@ -179,5 +179,6 @@ pyrightconfig.json
 secrets.yaml
 .vscode
 app/recordings
+.claude
 
 *.DS_Store
