@@ -22,6 +22,7 @@ def microphone_producer(
     device: str | None = None,
 ):
     logger.info(f"[{os.getpid()}] Microphone process starting.")
+
     signal.signal(signal.SIGINT, signal.SIG_IGN)
     existing_shm = shared_memory.SharedMemory(name=shared_mem_name)
     samples_per_chunk = mic_cfg.chunk_samples * mic_cfg.channels
@@ -29,16 +30,11 @@ def microphone_producer(
         (mic_cfg.buffer_slots, samples_per_chunk), dtype=mic_cfg.dtype, buffer=existing_shm.buf
     )
 
-    # Check if we should use the simple audio processor
-    use_simple_processor = os.getenv("USE_SIMPLE_AUDIO_PROCESSOR", "true").lower() == "true"
-    if use_simple_processor:
-        logger.info("Using SimpleAudioProcessor for audio processing")
-
     # Use higher gain for better speech recognition
     capture = AudioCapture(
         mic_cfg,
         device,
-        use_simple_processor=use_simple_processor,
+        webrtc_noise_gain=True,
         auto_gain_dbfs=35,  # Higher value for louder output
         noise_supression_level=2,
     )

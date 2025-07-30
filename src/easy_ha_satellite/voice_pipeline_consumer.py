@@ -52,12 +52,7 @@ async def _save_captured_audio(captured_chunks: list[bytes], mic_cfg: InputAudio
         try:
             # Generate timestamp-based filename
             timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            proc_type = (
-                "simple"
-                if os.getenv("USE_SIMPLE_AUDIO_PROCESSOR", "true").lower() == "true"
-                else "webrtc"
-            )
-            filename = f"pipeline_audio_{proc_type}_{timestamp}.wav"
+            filename = f"pipeline_audio_webrtc_{timestamp}.wav"
 
             # Combine all chunks
             audio_data = b"".join(captured_chunks)
@@ -144,6 +139,49 @@ class AsyncQueueReader:
             logger.debug("Stopped AsyncQueueReader thread")
 
 
+async def _save_captured_audio(captured_chunks: list[bytes], mic_cfg: InputAudioConfig) -> None:
+    """
+    Save captured pipeline audio to a WAV file for analysis.
+    This runs in a thread to avoid blocking the main pipeline.
+    """
+    import datetime
+    import wave
+
+    def save_audio():
+        try:
+            # Generate timestamp-based filename
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"pipeline_audio_webrtc_{timestamp}.wav"
+
+            # Combine all chunks
+            audio_data = b"".join(captured_chunks)
+
+            # Save to WAV file
+            with wave.open(filename, "wb") as wf:
+                wf.setnchannels(mic_cfg.channels)
+                wf.setsampwidth(2)  # 16-bit
+                wf.setframerate(mic_cfg.sample_rate)
+                wf.writeframes(audio_data)
+
+            # Calculate statistics
+            audio_array = np.frombuffer(audio_data, dtype=mic_cfg.dtype)
+            rms = np.sqrt(np.mean(audio_array.astype(np.float32) ** 2))
+            peak = np.max(np.abs(audio_array))
+            duration_ms = len(captured_chunks) * mic_cfg.chunk_ms
+
+            logger.info(f"Saved pipeline audio: {filename}")
+            logger.info(
+                f"Duration: {duration_ms}ms, RMS: {20 * np.log10(rms / 32768):.1f}dBFS, "
+                f"Peak: {20 * np.log10(peak / 32768):.1f}dBFS"
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to save captured audio: {e}")
+
+    # Save in thread to avoid blocking pipeline
+    await asyncio.to_thread(save_audio)
+
+
 async def run_pipeline(
     mic_audio: np.ndarray,
     write_index: Synchronized,
@@ -181,7 +219,7 @@ async def run_pipeline(
                 while need_audio.is_set() and not stop_all.is_set():
                     # Wait for the producer to write the next chunk
                     while local_read_index >= write_index.value:
-                        await asyncio.sleep(0.01)
+                        await asyncio.sleep(0)  # Yield to other tasks without delay
                     chunk: np.ndarray = mic_audio[local_read_index % mic_cfg.buffer_slots]
                     chunk_bytes = chunk.tobytes()
 
