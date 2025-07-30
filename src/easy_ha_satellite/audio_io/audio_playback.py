@@ -27,6 +27,7 @@ class PlaybackItem:
     command: PlaybackCommand
     audio_data: bytes | None = None
     future: asyncio.Future | None = None
+    loop: asyncio.AbstractEventLoop | None = None
 
 
 class AudioPlayback:
@@ -73,29 +74,46 @@ class AudioPlayback:
         """
         Queues audio for playback. Immediately stops any currently playing audio.
         """
+        logger.debug(f"AudioPlayback.play() called with {len(audio_data)} bytes, remix={remix}")
+
+        logger.debug("Starting playback thread...")
         self._start_playback_thread()
 
         # Prepare audio data
         try:
+            logger.debug("Preparing audio data...")
             final_audio_data = audio_data
             if remix:
+                logger.debug("Remixing audio...")
                 final_audio_data = await asyncio.to_thread(
                     self.remix_audio, final_audio_data, self._cfg
                 )
+            logger.debug(f"Audio preparation complete, final size: {len(final_audio_data)} bytes")
         except Exception as e:
             logger.error(f"Failed to prepare audio for playback: {e}")
             return
 
         # Stop any current playback
+        logger.debug("Queuing STOP command...")
         self._playback_queue.put(PlaybackItem(PlaybackCommand.STOP))
 
         # Queue new audio
+        logger.debug(
+            f"Creating future and queuing PLAY command with {len(final_audio_data)} bytes..."
+        )
         loop = asyncio.get_running_loop()
         future = loop.create_future()
-        self._playback_queue.put(PlaybackItem(PlaybackCommand.PLAY, final_audio_data, future))
+
+        # Store the loop reference with the item so the worker thread can use it
+        item = PlaybackItem(PlaybackCommand.PLAY, final_audio_data, future)
+        item.loop = loop  # Add loop reference
+        self._playback_queue.put(item)
+        logger.debug(f"PLAY command queued, queue size: {self._playback_queue.qsize()}")
 
         # Wait for playback to complete
+        logger.debug("Waiting for playback to complete...")
         await future
+        logger.debug("Playback completed!")
 
     def _playback_worker(self):
         """
@@ -107,14 +125,18 @@ class AudioPlayback:
 
         try:
             # Create the output stream once
+            logger.debug(
+                f"Creating OutputStream: rate={self._cfg.sample_rate}, channels={self._cfg.channels}, device={self._device}, dtype={self._cfg.dtype}"
+            )
             stream = sd.OutputStream(
                 samplerate=self._cfg.sample_rate,
                 channels=self._cfg.channels,
                 device=self._device,
                 dtype=self._cfg.dtype,
             )
+            logger.debug("OutputStream created, starting stream...")
             stream.start()
-            logger.debug(f"Created persistent stream on device {self._device}")
+            logger.debug(f"Persistent stream started successfully on device {self._device}")
 
             while not self._shutdown_event.is_set():
                 try:
@@ -128,23 +150,39 @@ class AudioPlayback:
                     elif item.command == PlaybackCommand.STOP:
                         # Just mark current playback as complete
                         if current_future and not current_future.done():
-                            current_future.set_result(None)
+                            if hasattr(item, "loop") and item.loop:
+                                item.loop.call_soon_threadsafe(current_future.set_result, None)
+                            else:
+                                current_future.set_result(None)
                         current_future = None
                         logger.debug("Stopped current playback")
 
                     elif item.command == PlaybackCommand.PLAY:
+                        logger.debug(
+                            f"Received PLAY command with {len(item.audio_data) if item.audio_data else 0} bytes"
+                        )
                         # Mark previous playback as complete
                         if current_future and not current_future.done():
-                            current_future.set_result(None)
+                            if hasattr(item, "loop") and item.loop:
+                                item.loop.call_soon_threadsafe(current_future.set_result, None)
+                            else:
+                                current_future.set_result(None)
 
                         current_future = item.future
+                        current_loop = item.loop
+                        logger.debug("Starting audio playback...")
 
                         # Play the audio
                         self._play_audio_on_stream(stream, item.audio_data)
+                        logger.debug("Audio playback finished")
 
                         # Mark playback as complete
                         if current_future and not current_future.done():
-                            current_future.set_result(None)
+                            logger.debug("Setting future result")
+                            if current_loop:
+                                current_loop.call_soon_threadsafe(current_future.set_result, None)
+                            else:
+                                current_future.set_result(None)
                         current_future = None
 
                 except queue.Empty:
@@ -152,7 +190,17 @@ class AudioPlayback:
                 except Exception:
                     logger.exception("Error in playback worker")
                     if current_future and not current_future.done():
-                        current_future.set_exception(Exception("Playback failed"))
+                        # Try to use loop if available, otherwise set directly
+                        try:
+                            if "current_loop" in locals() and current_loop:
+                                current_loop.call_soon_threadsafe(
+                                    current_future.set_exception, Exception("Playback failed")
+                                )
+                            else:
+                                current_future.set_exception(Exception("Playback failed"))
+                        except Exception:
+                            # If we can't set the exception, at least log it
+                            logger.exception("Failed to set exception on future")
                     current_future = None
 
         finally:

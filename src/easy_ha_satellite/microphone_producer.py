@@ -56,11 +56,6 @@ def microphone_producer(
                     # Increment after the write is complete
                     write_index.value += 1
 
-                if (
-                    current_write_index > 0 and current_write_index % 200 == 0
-                ):  # Log every few seconds
-                    logger.debug(f"Wrote chunk {current_write_index} to slot {slot_index}")
-
     except Exception:
         logger.exception("An unrecoverable error occurred in the microphone producer.")
     finally:

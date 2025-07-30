@@ -14,9 +14,6 @@ from numpy.typing import NDArray
 
 from easy_ha_satellite.audio_io import InputAudioConfig
 from easy_ha_satellite.config import get_root_logger
-from easy_ha_satellite.home_assistant import (
-    PipelineEventType,
-)
 from easy_ha_satellite.wake_word import WakewordConfig, WakeWordDetector
 
 logger = get_root_logger()
@@ -28,7 +25,7 @@ class WakeEventType(Enum):
 
 @dataclass(frozen=True, slots=True)
 class WakeEvent:
-    type: PipelineEventType
+    type: WakeEventType
     model_name: str
 
 
@@ -37,7 +34,8 @@ def wake_word_consumer(
     wake_cfg: WakewordConfig,
     shared_mem_name: str,
     write_index: Synchronized,
-    events_q: mp.Queue,
+    wake_counter: Synchronized,
+    wake_model_name: mp.Array,
     stop_event: Event,
 ):
     try:
@@ -60,8 +58,18 @@ def wake_word_consumer(
                 detected, model_name = detector.detect(audio_chunk)
                 if detected:
                     logger.info(f"{model_name} detected")
-                    event = WakeEvent(type=WakeEventType.DETECTED, model_name=model_name)
-                    events_q.put(event)
+                    start_time = time.time()
+                    with wake_counter.get_lock():
+                        wake_counter.value += 1
+                        # Store model name in shared array
+                        model_bytes = model_name.encode("utf-8")[
+                            :49
+                        ]  # Leave room for null terminator
+                        wake_model_name[: len(model_bytes)] = model_bytes
+                        wake_model_name[len(model_bytes)] = 0  # Null terminator
+                    logger.debug(
+                        f"Wake event signaled in {(time.time() - start_time) * 1000:.1f}ms"
+                    )
 
                 local_read_index += 1
             else:

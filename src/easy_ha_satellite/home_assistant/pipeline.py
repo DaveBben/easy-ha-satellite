@@ -79,7 +79,7 @@ class Pipeline:
         return await asyncio.wait_for(self._events.get(), timeout)
 
     async def start(self) -> None:
-        logger.info("Starting Pipeline")
+        logger.debug("Sending Pipeline Run Command")
         await self._client.send(
             AssistPipelineRun(
                 id=self._id,
@@ -91,24 +91,31 @@ class Pipeline:
         )
 
     async def _on_wake_word_start(self, msg: dict[str, Any]) -> None:
+        logger.debug("Received Wake Word Start Event")
         await self._events.put(PipelineEvent(data=msg, type=PipelineEventType.WAKE_WORD_START))
 
     async def _on_wake_word_end(self, msg: dict[str, Any]) -> None:
+        logger.debug("Received Wake Word End Event")
         await self._events.put(PipelineEvent(data=msg, type=PipelineEventType.WAKE_WORD_END))
 
     async def _on_tts_start(self, msg: dict[str, Any]) -> None:
+        logger.debug("Received TTS Start Event")
         await self._events.put(PipelineEvent(data=msg, type=PipelineEventType.TTS_START))
 
     async def on_stt_vad_start(self, msg: dict[str, Any]) -> None:
+        logger.debug("Received STT VAD Start Event")
         await self._events.put(PipelineEvent(data=msg, type=PipelineEventType.STT_VAD_START))
 
     async def _on_stt_vad_end(self, msg: dict[str, Any]) -> None:
+        logger.debug("Received STT VAD End Event")
         await self._events.put(PipelineEvent(data=msg, type=PipelineEventType.STT_VAD_END))
 
     async def _on_stt_start(self, msg: dict[str, Any]) -> None:
+        logger.debug("Received STT Start Event")
         await self._events.put(PipelineEvent(data=msg, type=PipelineEventType.STT_START))
 
     async def _on_run_start(self, msg: dict[str, Any]) -> None:
+        logger.debug("Received Run Start Event")
         try:
             self._stt_binary_handler_id = msg["data"]["runner_data"]["stt_binary_handler_id"]
         except KeyError:
@@ -116,10 +123,12 @@ class Pipeline:
         await self._events.put(PipelineEvent(data=msg, type=PipelineEventType.RUN_START))
 
     async def _on_run_end(self, msg: dict[str, Any]) -> None:
+        logger.debug("Received Run End Event")
         self._done = True
         await self._events.put(PipelineEvent(data=msg, type=PipelineEventType.RUN_END))
 
     async def _on_stt_end(self, msg: dict[str, Any]) -> None:
+        logger.debug("Received STT End Event")
         try:
             self._stt_output = msg["data"]["stt_output"]["text"]
             logger.info(f"Phrase: {self._stt_output}")
@@ -128,6 +137,7 @@ class Pipeline:
         await self._events.put(PipelineEvent(data=msg, type=PipelineEventType.STT_END))
 
     async def _on_tts_end(self, msg: dict[str, Any]) -> None:
+        logger.debug("Received TTS End Event")
         try:
             self._media_url = msg["data"]["tts_output"]["url"]
         except KeyError:
@@ -135,6 +145,7 @@ class Pipeline:
         await self._events.put(PipelineEvent(data=msg, type=PipelineEventType.TTS_END))
 
     async def _on_error(self, msg: dict[str, Any]) -> None:
+        logger.debug("Received Error Event")
         self._done = True
         await self._events.put(PipelineEvent(data=msg, type=PipelineEventType.ERROR))
 
@@ -151,7 +162,6 @@ class Pipeline:
 
     def handle_event(self, msg: dict[str, Any]) -> None:
         self._messages.append(msg)
-
         match msg:
             case {"type": "result", "success": False}:
                 logger.warning(f"Something went wrong: {msg}")

@@ -35,6 +35,12 @@ handlers:
     backupCount: 3
     encoding: utf8
 
+loggers:
+  easy_ha_satellite:
+    level: INFO
+    handlers: [console, file, error_file]
+    propagate: false
+
 root:
   level: INFO
   handlers: [console, file, error_file]

@@ -64,7 +64,9 @@ def main() -> None:
         write_index = multiprocessing.Value("L", 0)
         lock = multiprocessing.Lock()
         stop_event = multiprocessing.Event()
-        events = multiprocessing.Queue()
+        # Replace problematic Queue with simple shared memory approach
+        wake_counter = multiprocessing.Value("L", 0)  # Counter for wake events
+        wake_model_name = multiprocessing.Array("c", 50)  # Model name (50 chars max)
 
         # Create and start processes ---
         processes = [
@@ -83,14 +85,23 @@ def main() -> None:
             multiprocessing.Process(
                 name="wakeword",
                 target=wake_word_consumer,
-                args=(input_cfg, wake_cfg, shm.name, write_index, events, stop_event),
+                args=(
+                    input_cfg,
+                    wake_cfg,
+                    shm.name,
+                    write_index,
+                    wake_counter,
+                    wake_model_name,
+                    stop_event,
+                ),
             ),
             multiprocessing.Process(
                 name="pipeline",
                 target=voice_pipeline_consumer,
                 args=(
                     stop_event,
-                    events,
+                    wake_counter,
+                    wake_model_name,
                     shm.name,
                     write_index,
                     input_cfg,

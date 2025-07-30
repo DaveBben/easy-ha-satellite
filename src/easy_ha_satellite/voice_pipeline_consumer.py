@@ -8,9 +8,7 @@ import asyncio
 import multiprocessing as mp
 import multiprocessing.shared_memory as shared_memory
 import os
-import queue
 import signal
-import threading
 from asyncio import TaskGroup
 from contextlib import AsyncExitStack
 from multiprocessing.sharedctypes import Synchronized
@@ -35,7 +33,6 @@ from easy_ha_satellite.home_assistant import (
     Pipeline,
     PipelineEventType,
 )
-from easy_ha_satellite.wake_word_consumer import WakeEvent, WakeEventType
 
 logger = get_root_logger()
 
@@ -81,62 +78,6 @@ async def _save_captured_audio(captured_chunks: list[bytes], mic_cfg: InputAudio
 
     # Save in thread to avoid blocking pipeline
     await asyncio.to_thread(save_audio)
-
-
-class AsyncQueueReader:
-    """
-    Efficiently bridges a multiprocessing.Queue to asyncio by using a single
-    persistent thread instead of creating threads for each read operation.
-    """
-
-    def __init__(self, mp_queue: mp.Queue, loop: asyncio.AbstractEventLoop):
-        self._mp_queue = mp_queue
-        self._loop = loop
-        self._async_queue: asyncio.Queue[WakeEvent | None] = asyncio.Queue()
-        self._shutdown = threading.Event()
-        self._thread: threading.Thread | None = None
-        self._started = False
-
-    def start(self):
-        """Start the reader thread."""
-        if self._started:
-            return
-        self._started = True
-        self._thread = threading.Thread(target=self._reader_thread, daemon=True)
-        self._thread.start()
-        logger.debug("Started AsyncQueueReader thread")
-
-    def _reader_thread(self):
-        """Thread that continuously reads from mp.Queue and puts to asyncio.Queue."""
-        while not self._shutdown.is_set():
-            try:
-                # Use a short timeout to check shutdown periodically
-                event = self._mp_queue.get(timeout=0.1)
-                # Use call_soon_threadsafe to safely put into async queue
-                self._loop.call_soon_threadsafe(self._async_queue.put_nowait, event)
-            except queue.Empty:
-                continue
-            except Exception:
-                logger.exception("Error in AsyncQueueReader thread")
-
-    async def get(self, timeout: float | None = None) -> WakeEvent:
-        """Get an event from the queue with optional timeout."""
-        if not self._started:
-            self.start()
-
-        if timeout is None:
-            return await self._async_queue.get()
-        else:
-            return await asyncio.wait_for(self._async_queue.get(), timeout=timeout)
-
-    def stop(self):
-        """Stop the reader thread."""
-        if self._started:
-            self._shutdown.set()
-            if self._thread:
-                self._thread.join(timeout=1.0)
-            self._started = False
-            logger.debug("Stopped AsyncQueueReader thread")
 
 
 async def _save_captured_audio(captured_chunks: list[bytes], mic_cfg: InputAudioConfig) -> None:
@@ -192,14 +133,14 @@ async def run_pipeline(
     app_cfg: AppConfig,
 ) -> None:
     end_stage = "tts"
+    logger.debug("Inside of run pipeline")
     if not app_cfg.enable_tts:
-        logger.info("TTS is disable")
+        logger.debug("TTS is disabled")
         end_stage = "intent"
     pipe = Pipeline(client=ws_client, sample_rate=mic_cfg.sample_rate, end_stage=end_stage)
     ws_client.on_event = pipe.handle_event
 
     need_audio = asyncio.Event()
-    stop_all = asyncio.Event()
     need_audio.set()
 
     # Audio capture for testing/debugging
@@ -208,63 +149,128 @@ async def run_pipeline(
 
     async def audio_pump():
         try:
-            while not stop_all.is_set():
-                # 1. Wait for the signal to start pumping audio
-                await need_audio.wait()
+            logger.debug("audio_pump starting...")
+            # Wait for the signal to start pumping audio
+            await need_audio.wait()
 
-                # Sync up to the most recent audio data in the buffer
-                local_read_index = write_index.value - 1
+            # Sync up to the most recent audio data in the buffer
+            local_read_index = write_index.value - 1
 
-                # Continuously pump audio as long as the signal is active
-                while need_audio.is_set() and not stop_all.is_set():
-                    # Wait for the producer to write the next chunk
-                    while local_read_index >= write_index.value:
-                        await asyncio.sleep(0)  # Yield to other tasks without delay
-                    chunk: np.ndarray = mic_audio[local_read_index % mic_cfg.buffer_slots]
-                    chunk_bytes = chunk.tobytes()
+            # Continuously pump audio as long as the signal is active
+            while need_audio.is_set():
+                # Wait for the producer to write the next chunk
+                while local_read_index >= write_index.value:
+                    await asyncio.sleep(0)  # Yield to other tasks without delay
+                chunk: np.ndarray = mic_audio[local_read_index % mic_cfg.buffer_slots]
+                chunk_bytes = chunk.tobytes()
 
-                    # Capture audio for debugging if enabled
-                    if capture_audio:
-                        captured_chunks.append(chunk_bytes)
+                # Capture audio for debugging if enabled
+                if capture_audio:
+                    captured_chunks.append(chunk_bytes)
 
+                try:
                     await pipe.send_audio(chunk_bytes)
+                except Exception as e:
+                    logger.error(f"Failed to send audio chunk: {e}")
+                    raise
 
-                    # Move to the next chunk
-                    local_read_index += 1
+                # Move to the next chunk
+                local_read_index += 1
+            logger.debug("Send audio pump cleanly stopped")
 
         except asyncio.CancelledError:
+            logger.debug("audio_pump cancelled")
             pass
+        except Exception as e:
+            logger.error(f"audio_pump failed: {e}")
+            raise
 
     async def event_pump():
-        async for evt in pipe:
-            match evt.type:
-                case PipelineEventType.STT_START:
-                    need_audio.set()
-                    logger.info("🎤 Listening")
-                    await play_alert(Alert.LISTEN_START, speaker)
-                case PipelineEventType.STT_END:
-                    need_audio.clear()
-                    stop_all.set()
-                    logger.info("🛑 No longer listening")
-                    await play_alert(Alert.LISTEN_COMPLETE, speaker)
-                case PipelineEventType.ERROR:
-                    need_audio.clear()
-                    stop_all.set()
-                    await play_alert(Alert.ERROR, speaker)
-                case _:
-                    pass
+        try:
+            logger.debug("event_pump starting...")
+            async for evt in pipe:
+                match evt.type:
+                    case PipelineEventType.STT_START:
+                        need_audio.set()
+                        logger.info("🎤 Listening")
+                        logger.debug("About to play listen start alert...")
+                        try:
+                            logger.debug("Calling play_alert function...")
+                            await asyncio.wait_for(
+                                play_alert(Alert.LISTEN_START, speaker), timeout=5.0
+                            )
+                            logger.debug("Listen start alert played successfully")
+                        except TimeoutError:
+                            logger.error("Listen start alert timed out after 5 seconds")
+                        except Exception as e:
+                            logger.error(f"Failed to play listen start alert: {e}")
+                    case PipelineEventType.STT_END:
+                        need_audio.clear()
+                        logger.info("🛑 No longer listening")
+                        logger.debug("About to play listen complete alert...")
+                        try:
+                            await asyncio.wait_for(
+                                play_alert(Alert.LISTEN_COMPLETE, speaker), timeout=2.0
+                            )
+                            logger.debug("Listen complete alert played successfully")
+                        except TimeoutError:
+                            logger.error("Listen complete alert timed out after 2 seconds")
+                        except Exception as e:
+                            logger.error(f"Failed to play listen complete alert: {e}")
+                    case PipelineEventType.ERROR:
+                        need_audio.clear()
+                        try:
+                            await asyncio.wait_for(play_alert(Alert.ERROR, speaker), timeout=2.0)
+                            logger.debug("Error alert played successfully")
+                        except TimeoutError:
+                            logger.error("Error alert timed out after 2 seconds")
+                        except Exception as e:
+                            logger.error(f"Failed to play error alert: {e}")
+                    case _:
+                        pass
+            logger.debug("Event pump cleanll cancelled")
+        except asyncio.CancelledError:
+            logger.debug("event_pump cancelled")
+            pass
+        except Exception as e:
+            logger.error(f"event_pump failed: {type(e).__name__}: {e}")
+            raise
 
     try:
+        logger.debug("Starting TaskGroup with 3 tasks...")
+
+        async def pipe_start_wrapper():
+            try:
+                logger.debug("pipe.start() starting...")
+                await pipe.start()
+                logger.debug("pipe.start() completed successfully")
+            except Exception as e:
+                logger.error(f"pipe.start() failed: {type(e).__name__}: {e}")
+                raise
+
         async with TaskGroup() as tg:
+            logger.debug("Creating audio_pump task...")
             tg.create_task(audio_pump())
+            logger.debug("Creating event_pump task...")
             tg.create_task(event_pump())
-            tg.create_task(pipe.start())
+            logger.debug("Creating pipe.start task...")
+            tg.create_task(pipe_start_wrapper())
+            logger.debug("All tasks created, waiting for TaskGroup...")
+        logger.debug("TaskGroup completed successfully")
     except KeyboardInterrupt:
+        logger.debug("TaskGroup interrupted by KeyboardInterrupt")
         pass
     except asyncio.CancelledError:
+        logger.debug("TaskGroup cancelled")
         pass
-    finally:
-        stop_all.set()
+    except Exception as e:
+        # Handle ExceptionGroup from TaskGroup
+        if hasattr(e, "exceptions"):
+            logger.error(f"TaskGroup failed with {len(e.exceptions)} sub-exceptions:")
+            for i, exc in enumerate(e.exceptions):
+                logger.error(f"  Sub-exception {i + 1}: {type(exc).__name__}: {exc}")
+        else:
+            logger.error(f"TaskGroup failed with single exception: {type(e).__name__}: {e}")
 
     # Save captured audio if enabled
     if capture_audio and captured_chunks:
@@ -281,62 +287,126 @@ async def main(
     out_audio_cfg: OutputAudioConfig,
     ha_cfg: HomeAssistantConfig,
     stop_event: Event,
-    events_q: mp.Queue,
+    wake_counter: Synchronized,
+    wake_model_name: mp.Array,
     audio_buffer: np.ndarray,
     write_index: Synchronized,
     app_cfg: AppConfig,
 ) -> None:
-    # Create the async queue reader
-    loop = asyncio.get_running_loop()
-    queue_reader = AsyncQueueReader(events_q, loop)
-
+    logger.debug("Voice pipeline main() starting...")
     try:
+        last_wake_count = 0
+        poll_count = 0
+        speaker, ha_http_client, ha_ws_client = None, None, None
+        logger.debug("Etnering AsyncExitStack")
         async with AsyncExitStack() as stack:
-            speaker = await stack.enter_async_context(
-                AudioPlayback(out_audio_cfg, os.getenv("OUTPUT_AUDIO_DEVICE"))
-            )
+            logger.debug("Creating HASS HTTP client...")
             ha_http_client = await stack.enter_async_context(
                 HASSHttpClient(ha_cfg, os.environ["HA_TOKEN"])
             )
+            logger.debug("Creating HASS WebSocket client...")
             ha_ws_client = await stack.enter_async_context(
                 HASSocketClient(ha_cfg, os.environ["HA_TOKEN"])
             )
+            speaker = await stack.enter_async_context(
+                AudioPlayback(out_audio_cfg, os.getenv("OUTPUT_AUDIO_DEVICE"))
+            )
 
-            # Pre-load all alert sounds to avoid lag on first playback
-            preload_alerts(speaker.audio_config)
-
+            logger.debug("Playing connected alert...")
             await play_alert(Alert.CONNECTED, speaker)
+            logger.debug("Starting polling loop")
             while not stop_event.is_set():
-                # Wait for detector to signal wake
-                try:
-                    event: WakeEvent = await queue_reader.get(timeout=1.0)
-                except TimeoutError:
-                    continue
+                # Check for wake word detection using shared memory counter
+                poll_count += 1
+                if poll_count % 1000 == 0:  # Log every 10 seconds (1000 * 0.01s)
+                    logger.debug(
+                        f"Voice pipeline polling (count={poll_count}, last_wake={last_wake_count})"
+                    )
 
-                if event.type == WakeEventType.DETECTED:
-                    asyncio.create_task(
-                        run_pipeline(
-                            mic_audio=audio_buffer,
-                            write_index=write_index,
-                            mic_cfg=in_audio_cfg,
-                            ws_client=ha_ws_client,
-                            http_client=ha_http_client,
-                            speaker=speaker,
-                            app_cfg=app_cfg,
+                current_wake_count = wake_counter.value
+                if current_wake_count > last_wake_count:
+                    # New wake word detected!
+                    logger.info("Wake word detected!")
+
+                    # Get the model name from shared array
+                    with wake_counter.get_lock():
+                        model_name_bytes = bytes(wake_model_name[:])
+                        model_name = model_name_bytes.rstrip(b"\x00").decode("utf-8")
+
+                    logger.info(f"Starting pipeline for model: {model_name}")
+                    last_wake_count = current_wake_count
+
+                    # Check WebSocket connection status before using it
+                    ws_connected = ha_ws_client._ws is not None
+                    logger.debug(f"WebSocket connected: {ws_connected}")
+
+                    # If WebSocket is disconnected, try to reconnect
+                    if not ws_connected:
+                        logger.warning("WebSocket disconnected, attempting to reconnect...")
+                        try:
+                            await ha_ws_client.start()  # This should reconnect
+                            logger.debug("WebSocket reconnected successfully")
+                        except Exception as e:
+                            logger.error(f"Failed to reconnect WebSocket: {e}")
+                            continue  # Skip this wake word and try again later
+
+                    # Check HTTP client session status
+                    http_session_active = (
+                        hasattr(ha_http_client, "_session") and ha_http_client._session is not None
+                    )
+                    logger.debug(f"HTTP client session active: {http_session_active}")
+
+                    # If HTTP session is not active, try to restart it
+                    if not http_session_active:
+                        logger.warning("HTTP client session not active, attempting to restart...")
+                        try:
+                            await ha_http_client.start()  # This should start the session
+                            logger.debug("HTTP client session restarted successfully")
+                        except Exception as e:
+                            logger.error(f"Failed to restart HTTP client session: {e}")
+                            continue  # Skip this wake word and try again later
+
+                    # Add timeout to pipeline execution to prevent hanging
+                    pipeline_task = asyncio.create_task(
+                        asyncio.wait_for(
+                            run_pipeline(
+                                mic_audio=audio_buffer,
+                                write_index=write_index,
+                                mic_cfg=in_audio_cfg,
+                                ws_client=ha_ws_client,
+                                http_client=ha_http_client,
+                                speaker=speaker,
+                                app_cfg=app_cfg,
+                            ),
+                            timeout=30.0,  # 30 second timeout
                         )
                     )
+
+                    # Handle pipeline timeout
+                    def handle_pipeline_result(task):
+                        try:
+                            task.result()
+                        except TimeoutError:
+                            logger.error("Pipeline execution timed out after 30 seconds")
+                        except asyncio.CancelledError:
+                            pass
+                        except Exception as e:
+                            logger.error(f"Pipeline execution failed: {e}")
+
+                    pipeline_task.add_done_callback(handle_pipeline_result)
+
+                await asyncio.sleep(0.01)  # Small delay to avoid busy waiting
 
     except KeyboardInterrupt:
         pass
     except asyncio.CancelledError:
         pass
-    finally:
-        queue_reader.stop()
 
 
 def voice_pipeline_consumer(
     stop_event: Event,
-    events_q: mp.Queue,
+    wake_counter: Synchronized,
+    wake_model_name: mp.Array,
     shm_name: str,
     write_index: Synchronized,
     mic_cfg: InputAudioConfig,
@@ -346,15 +416,25 @@ def voice_pipeline_consumer(
 ):
     try:
         logger.info(f"[{os.getpid()}] Voice Pipeline process starting.")
+
+        logger.debug("Connecting to shared memory...")
         # Connect to shared memory
         existing_shm = shared_memory.SharedMemory(name=shm_name)
         samples_per_chunk = mic_cfg.chunk_samples * mic_cfg.channels
+        logger.debug("Creating buffer from shared memory...")
         buffer = np.ndarray(
             (mic_cfg.buffer_slots, samples_per_chunk),
             dtype=mic_cfg.dtype,
             buffer=existing_shm.buf,
         )
+        logger.debug("Setting up signal handling...")
         signal.signal(signal.SIGINT, signal.SIG_IGN)
+
+        logger.debug("Pre-loading alerts...")
+        preload_alerts(speaker_cfg)
+        logger.debug("Alerts preloaded")
+
+        logger.debug("Starting asyncio runner with uvloop...")
         with asyncio.Runner(loop_factory=uvloop.new_event_loop) as runner:
             runner.run(
                 main(
@@ -362,9 +442,10 @@ def voice_pipeline_consumer(
                     out_audio_cfg=speaker_cfg,
                     ha_cfg=ha_cfg,
                     stop_event=stop_event,
+                    wake_counter=wake_counter,
+                    wake_model_name=wake_model_name,
                     audio_buffer=buffer,
                     write_index=write_index,
-                    events_q=events_q,
                     app_cfg=app_cfg,
                 )
             )

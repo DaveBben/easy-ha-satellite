@@ -79,13 +79,19 @@ def get_root_logger() -> logging.Logger:
             else:
                 handler["filename"] = str((log_dir / Path(filename).name).resolve())
 
-    # 3) Optional env override for root level
-    env_level = os.getenv(LOG_LEVEL)
-    if env_level:
-        cfg.setdefault("root", {})
-        cfg["root"]["level"] = env_level.upper()
+    # Optional env override for application logger level only
+    if LOG_LEVEL:
+        logger.info("LOG Level is %s", LOG_LEVEL)
+        # Update only the easy_ha_satellite logger level
+        cfg.setdefault("loggers", {})
+        if "easy_ha_satellite" in cfg["loggers"]:
+            cfg["loggers"]["easy_ha_satellite"]["level"] = LOG_LEVEL.upper()
 
-    # 4) Apply config
+        # Also update handler levels to match (so DEBUG messages can pass through)
+        for handler_name in cfg.get("handlers", {}):
+            cfg["handlers"][handler_name]["level"] = LOG_LEVEL.upper()
+
+    # Apply config
     logging.config.dictConfig(cfg)
     return logging.getLogger("easy_ha_satellite")
 
