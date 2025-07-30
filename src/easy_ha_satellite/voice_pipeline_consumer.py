@@ -8,7 +8,10 @@ import asyncio
 import multiprocessing as mp
 import multiprocessing.shared_memory as shared_memory
 import os
+import queue
 import signal
+import threading
+import time
 from asyncio import TaskGroup
 from contextlib import AsyncExitStack
 from multiprocessing.sharedctypes import Synchronized
@@ -33,6 +36,7 @@ from easy_ha_satellite.home_assistant import (
     Pipeline,
     PipelineEventType,
 )
+from easy_ha_satellite.wake_word_consumer import WakeEvent, WakeEventType
 
 logger = get_root_logger()
 
@@ -194,15 +198,38 @@ async def run_pipeline(
                         need_audio.set()
                         logger.info("🎤 Listening")
                         logger.debug("About to play listen start alert...")
-                        play_alert(Alert.LISTEN_START, speaker)
+                        try:
+                            logger.debug("Calling play_alert function...")
+                            await asyncio.wait_for(
+                                play_alert(Alert.LISTEN_START, speaker), timeout=5.0
+                            )
+                            logger.debug("Listen start alert played successfully")
+                        except asyncio.TimeoutError:
+                            logger.error("Listen start alert timed out after 5 seconds")
+                        except Exception as e:
+                            logger.error(f"Failed to play listen start alert: {e}")
                     case PipelineEventType.STT_END:
                         need_audio.clear()
                         logger.info("🛑 No longer listening")
                         logger.debug("About to play listen complete alert...")
-                        play_alert(Alert.LISTEN_COMPLETE, speaker),
+                        try:
+                            await asyncio.wait_for(
+                                play_alert(Alert.LISTEN_COMPLETE, speaker), timeout=2.0
+                            )
+                            logger.debug("Listen complete alert played successfully")
+                        except asyncio.TimeoutError:
+                            logger.error("Listen complete alert timed out after 2 seconds")
+                        except Exception as e:
+                            logger.error(f"Failed to play listen complete alert: {e}")
                     case PipelineEventType.ERROR:
                         need_audio.clear()
-                        play_alert(Alert.ERROR, speaker)
+                        try:
+                            await asyncio.wait_for(play_alert(Alert.ERROR, speaker), timeout=2.0)
+                            logger.debug("Error alert played successfully")
+                        except asyncio.TimeoutError:
+                            logger.error("Error alert timed out after 2 seconds")
+                        except Exception as e:
+                            logger.error(f"Failed to play error alert: {e}")
                     case _:
                         pass
             logger.debug("Event pump cleanll cancelled")
@@ -290,7 +317,7 @@ async def main(
             )
 
             logger.debug("Playing connected alert...")
-            play_alert(Alert.CONNECTED, speaker)
+            await play_alert(Alert.CONNECTED, speaker)
             logger.debug("Starting polling loop")
             while not stop_event.is_set():
                 # Check for wake word detection using shared memory counter

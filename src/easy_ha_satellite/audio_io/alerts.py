@@ -57,13 +57,13 @@ def _get_alert_bytes(alert: Alert, audio_config: OutputAudioConfig) -> bytes:
         return _sounds[alert]
 
 
-def play_alert(alert: Alert, player: AudioPlayback) -> None:
+async def play_alert(alert: Alert, player: AudioPlayback) -> None:
     logger.debug(f"play_alert called for {alert.value}")
     try:
         logger.debug("Getting alert bytes...")
         pcm_bytes = _get_alert_bytes(alert, player.audio_config)
         logger.debug(f"Got {len(pcm_bytes)} bytes, calling player.play()...")
-        player.play_immediate(pcm_bytes, remix=False)
+        await player.play(pcm_bytes, remix=False)
         logger.debug("player.play() completed successfully")
     except Exception as e:
         logger.error(f"play_alert failed: {e}")
