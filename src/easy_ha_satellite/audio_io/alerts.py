@@ -57,7 +57,7 @@ def _get_alert_bytes(alert: Alert, audio_config: OutputAudioConfig) -> bytes:
         return _sounds[alert]
 
 
-async def play_alert(alert: Alert, player: AudioPlayback) -> None:
+def play_alert(alert: Alert, player: AudioPlayback) -> None:
     logger.debug(f"play_alert called for {alert.value}")
     try:
         logger.debug("Getting alert bytes...")
